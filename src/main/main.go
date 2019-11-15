@@ -1,18 +1,25 @@
 package main
 
 import (
+	"doofile"
 	"fmt"
-	"github.com/fsnotify"
-	"io/ioutil"
 	"logdoo"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/fsnotify"
 )
 
 const (
 	WatcherModify = 1
 	WatcherStop   = 2
+)
+
+const (
+	ServiceCfgChange = 1
+	FileCfgChange    = 2
+	ComCfgChange     = 3
 )
 
 const (
@@ -22,40 +29,102 @@ const (
 
 var monitorCfg = NewMonitorCfg()
 var monitorService = NewMonitorService()
+var monitorFile = NewMonitorFile()
 var monitorEmail = NewEmail()
 
+var logSer = logdoo.NewLogger()
+var logFile = logdoo.NewLogger()
+
 func main() {
-	RunWindowService(IsRelease)
+	RunWindowService(IsDebug)
 }
 
-func ServerMain() {
+//mainMonitorService 监控服务主流程
+func mainMonitorService() {
 	//初始化日记
 	if logPath, err := CreateLogDir("monitorServiceLog"); err == nil {
-		logdoo.SetDayLogHandleDir(logPath)
-		logdoo.SetDayLogHandleFileSize(800)
-		defer logdoo.Close()
+		var logSerF = logdoo.NewDayLogHandle(logPath, 800)
+		var logSerC = logdoo.NewConsoleHandler()
+		logSer.SetHandlers(logSerC, logSerF)
 	} else {
 		panic("CreateLogDir err")
 	}
 
 	if monitorCfg == nil {
-		logdoo.ErrorDoo("init monitor config file fail")
+		logSer.ErrorDoo("init monitor config file fail")
 		return
 	}
 
-	logdoo.InfoDoo("***service start***")
+	logSer.InfoDoo("***monitor service start***")
 
 	//获取配置文件目录
 	cfgPath, err := GetCfgPath()
 	if err != nil {
-		logdoo.ErrorDoo("GetCfgPath err", err)
+		logSer.ErrorDoo("GetCfgPath err", err)
 		return
 	}
 
-	if err := LoadCfgService(monitorCfg, monitorService, monitorEmail, cfgPath); err != nil {
-		logdoo.ErrorDoo(err)
+	if err := LoadMonitorServiceCfg(monitorCfg, monitorService, monitorEmail, cfgPath); err != nil {
+		logSer.ErrorDoo(err)
 	}
+
+	//配置每个日记文件的最大的大小
+	if monitorCfg.logFileSize > 0 {
+		logSer.SetDayLogHandleFileSize(monitorCfg.logFileSize)
+	}
+
 	monitorService.StartMonitor(monitorCfg, monitorEmail)
+}
+
+//mainMonitorFile 监控文件
+func mainMonitorFile() {
+	//初始化日记
+	if logPath, err := CreateLogDir("monitorFileLog"); err == nil {
+		var logFileF = logdoo.NewDayLogHandle(logPath, 800)
+		var logFileC = logdoo.NewConsoleHandler()
+		logFile.SetHandlers(logFileC, logFileF)
+	} else {
+		panic("CreateLogDir err")
+	}
+
+	if monitorCfg == nil {
+		logFile.ErrorDoo("init monitor config file fail")
+		return
+	}
+
+	logFile.InfoDoo("***monitor service start***")
+
+	//获取配置文件目录
+	cfgPath, err := GetCfgPath()
+	if err != nil {
+		logFile.ErrorDoo("GetCfgPath err", err)
+		return
+	}
+
+	if err := monitorCfg.LoadMonitorFileCfg(cfgPath); err != nil {
+		logFile.ErrorDoo("LoadMonitorFileCfg err:", err)
+	}
+
+	//配置每个日记文件的最大的大小
+	if monitorCfg.logFileSize > 0 {
+		logFile.SetDayLogHandleFileSize(monitorCfg.logFileSize)
+	}
+
+	paths := monitorCfg.GetMonitorFileList() //获取监控文件列表
+	paths = RemoveRep(paths)                 //去除重复文件
+
+	monitorFile.AddMonitorFile(paths)
+	go monitorFile.StartWatcher() //开始监控，并阻塞直到退出
+}
+
+func WaitReloadCfg() {
+
+	//获取配置文件目录
+	cfgPath, err := GetCfgPath()
+	if err != nil {
+		logSer.ErrorDoo("GetCfgPath err", err)
+		return
+	}
 
 	hasModify := make(chan int)
 	defer close(hasModify)
@@ -65,15 +134,30 @@ func ServerMain() {
 	for {
 		select {
 		case event := <-hasModify:
-			if event == WatcherModify {
-				if err := UpdateCfgService(monitorCfg, monitorService, monitorEmail, cfgPath); err != nil {
-					logdoo.ErrorDoo(err)
+			switch event {
+			case ServiceCfgChange:
+				logSer.InfoDoo("ServiceCfgChange")
+				if err := UpdateMonitorServiceCfg(monitorCfg, monitorService, monitorEmail, cfgPath); err != nil {
+					logSer.ErrorDoo(err)
 				}
+			case FileCfgChange:
+				logFile.InfoDoo("FileCfgChange")
+			case ComCfgChange:
+				logFile.InfoDoo("CommonCfgChange")
+				logSer.InfoDoo("CommonCfgChange")
+				if err := monitorCfg.LoadMonitorComCfg(cfgPath); err != nil {
+					logFile.ErrorDoo("LoadMonitorComCfg err:", err)
+					logSer.ErrorDoo("LoadMonitorComCfg err:", err)
+				} else {
+					monitorEmail.UpdateEmail(monitorCfg.GetEmailData()) //更新邮件配置
+				}
+
+			default:
 			}
 
 		case <-timer.C:
-			if err := UpdateMoniService(monitorCfg, monitorService, monitorEmail, cfgPath); err != nil {
-				logdoo.ErrorDoo(err)
+			if err := UpdateMonitorServiceByCfg(monitorCfg, monitorService); err != nil {
+				logSer.ErrorDoo(err)
 			}
 
 		case <-monitorService.stopChan:
@@ -83,66 +167,18 @@ func ServerMain() {
 	}
 }
 
+//CloseService 关闭说有服务并释放资源
 func CloseService() {
 	monitorService.stopChan <- true
-	logdoo.InfoDoo("***service close***")
-}
-
-//LoadCfgService 根据配置文件加载监控服务信息
-func LoadCfgService(mc *MonitorCfg, ms *MonitorService, e *Email, cfgPath string) error {
-	if err := mc.LoadCfg(cfgPath); err != nil {
-		return fmt.Errorf("LoadCfg err:%s", err)
+	monitorFile.stopChan <- true
+	logSer.InfoDoo("***monitor service close***")
+	logFile.InfoDoo("***monitor service close***")
+	if logSer != nil {
+		logSer.Close()
 	}
-
-	e.UpdateEmail(mc.GetEmailData())
-	specServices := mc.GetSpecServices()
-	partServices := mc.GetPartServices()
-	ms.AddSpecService(specServices)
-	ms.AddPartService(partServices)
-	services := ms.GetMointorServices()
-	var str string
-	for _, service := range services {
-		str += service + "\n"
+	if logFile != nil {
+		logFile.Close()
 	}
-	logdoo.InfoDoo(fmt.Sprintf("LoadCfgService cur monitor services:%d\r\n%s", len(services), str))
-
-	return nil
-}
-
-//UpdateCfgService 配置文件修改时更新同时更新监控数据
-func UpdateCfgService(mc *MonitorCfg, ms *MonitorService, e *Email, cfgPath string) error {
-	if err := mc.LoadCfg(cfgPath); err != nil {
-		return fmt.Errorf("LoadCfg err:%s", err)
-	}
-
-	e.UpdateEmail(mc.GetEmailData())
-	specServices := mc.GetSpecServices()
-	partServices := mc.GetPartServices()
-	ms.UpdateServices(specServices, partServices)
-	services := ms.GetMointorServices()
-	var str string
-	for _, service := range services {
-		str += service + "\n"
-	}
-	logdoo.InfoDoo(fmt.Sprintf("UpdateCfgService cur monitor services:%d\r\n%s", len(services), str))
-
-	return nil
-}
-
-//UpdateMoniService 用于定时任务定时刷新任务管理器中需要监控的服务
-func UpdateMoniService(mc *MonitorCfg, ms *MonitorService, e *Email, cfgPath string) error {
-
-	specServices := mc.GetSpecServices()
-	partServices := mc.GetPartServices()
-	ms.UpdateServices(specServices, partServices)
-	services := ms.GetMointorServices()
-	var str string
-	for _, service := range services {
-		str += service + "\n"
-	}
-	logdoo.InfoDoo(fmt.Sprintf("UpdateMoniService cur monitor services:%d\r\n%s", len(services), str))
-
-	return nil
 }
 
 //WatchCfgFile 监控配置文件是否有被修改了
@@ -150,32 +186,53 @@ func WatchCfgFile(cfgPath string, hasModify chan<- int) {
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		logdoo.WarnDoo("watcher cfg file modify err:", err)
+		logSer.WarnDoo("watcher cfg file modify err:", err)
 	}
 	defer watcher.Close()
+
+	var mf = NewIniFileMonitor()
+	cfgFileMonitor := doofile.NewIniFile()
+	if _, err := cfgFileMonitor.LoadMonitorIniFiles([]string{cfgPath}); err != nil {
+		logFile.InfoDoo(err)
+	}
+	mf.SetIniFileMonitor(cfgFileMonitor)
 
 	stop := make(chan int)
 	defer close(stop)
 
 	//开协程监听文件是否别修改
 	go func() {
+		var oldName string
+		var isRename = false
 		for {
 			select {
 			case event, ok := <-watcher.Events:
 				if !ok {
-					hasModify <- WatcherStop
 					stop <- WatcherStop
 					return
 				}
 
+				//重命名操作做记号处理
+				if event.Op == fsnotify.Rename {
+					oldName = event.Name
+					isRename = true
+				}
+
 				//当前监控的配置文件有write操作了证明被修改了
 				if event.Op&fsnotify.Write == fsnotify.Write {
-					hasModify <- WatcherModify
+					if !isRename {
+						oldName = event.Name
+					} else {
+						isRename = false
+					}
+
+					if doofile.IsIniFile(oldName) && doofile.IsIniFile(event.Name) {
+						HandleCfgChange(oldName, event.Name, mf, hasModify)
+					}
 				}
 
 			case _, ok := <-watcher.Errors:
 				if !ok {
-					hasModify <- WatcherStop
 					stop <- WatcherStop
 					return
 				}
@@ -184,10 +241,34 @@ func WatchCfgFile(cfgPath string, hasModify chan<- int) {
 	}()
 
 	if err := watcher.Add(cfgPath); err != nil {
-		logdoo.WarnDoo("Add watcher cfg file modify err:", err)
+		logSer.WarnDoo("Add watcher cfg file modify err:", err)
 	}
 
 	<-stop
+}
+
+//HandleCfgChange 处理配置文件的修改操作
+func HandleCfgChange(oldName, newName string, mf *IniFileMonitor, hasModify chan<- int) {
+	secMap := mf.GetChangeSection(oldName, newName)
+	if _, ok := secMap["MonitorServiceSpec"]; ok {
+		hasModify <- ServiceCfgChange
+	} else if _, ok := secMap["MonitorServicePart"]; ok {
+		hasModify <- ServiceCfgChange
+	}
+
+	if _, ok := secMap["MonitorFileDir"]; ok {
+		hasModify <- FileCfgChange
+	} else if _, ok := secMap["MonitorFileSpec"]; ok {
+		hasModify <- FileCfgChange
+	}
+
+	if _, ok := secMap["EmailInfo"]; ok {
+		hasModify <- ComCfgChange
+	} else if _, ok := secMap["CommonInfo"]; ok {
+		hasModify <- ComCfgChange
+	}
+
+	return
 }
 
 //PathExists 判断路径是否存在
@@ -269,49 +350,4 @@ func IsDir(path string) bool {
 		return false
 	}
 	return s.IsDir()
-}
-
-//GetAttachByPath 获取指定目录下的附件
-func GetAttachByPath(path string) (attach string) {
-	if !IsDir(path) {
-		return path
-	}
-
-	if !PathExists(path) {
-		logdoo.ErrorDoo("path", path, "no exist")
-		return ""
-	}
-
-	attach, err := GetLastModFilesByPath(path)
-	if err != nil {
-		logdoo.ErrorDoo("GetLastModFilesByPath err:", err, "attach path", path)
-		return ""
-	}
-
-	return attach
-}
-
-//GetLastModFilesByPath 获取指定目录下最后修改的文件
-func GetLastModFilesByPath(dirPth string) (files string, err error) {
-	dir, err := ioutil.ReadDir(dirPth)
-	if err != nil {
-		return "", err
-	}
-
-	PthSep := string(os.PathSeparator)
-	var tempFile os.FileInfo
-	for i, fi := range dir {
-		if !fi.IsDir() {
-			if i == 0 {
-				tempFile = fi
-			} else {
-				if tempFile.ModTime().Before(fi.ModTime()) {
-					tempFile = fi
-				}
-			}
-			files = dirPth + PthSep + tempFile.Name()
-		}
-	}
-
-	return files, nil
 }

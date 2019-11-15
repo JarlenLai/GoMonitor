@@ -1,7 +1,9 @@
 package main
 
 import (
-	"logdoo"
+	"fmt"
+	"io/ioutil"
+	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,19 +43,79 @@ type MonitorService struct {
 func NewMonitorService() *MonitorService {
 	manager, err := mgr.Connect()
 	if err != nil {
-		logdoo.ErrorDoo("NewMonitorService fail to open mgr err", err)
+		logSer.ErrorDoo("NewMonitorService fail to open mgr err", err)
 		return nil
 	}
 	return &MonitorService{scm: manager,
-		services:     		 make(map[string]*mgr.Service),
-		serviceEmail: 		 make(map[string]bool),
-		serviceState: 		 make(map[string]int),
-		serviceAddChan: 	 make([]chan mgr.Service,ServiceChanNum),
+		services:            make(map[string]*mgr.Service),
+		serviceEmail:        make(map[string]bool),
+		serviceState:        make(map[string]int),
+		serviceAddChan:      make([]chan mgr.Service, ServiceChanNum),
 		serviceAddChanIndex: make(map[int]bool, ServiceChanNum),
 		curAddChanIndex:     0,
 		serviceDelChan:      make(chan mgr.Service, 100),
 		stop:                false,
 		stopChan:            make(chan bool)}
+}
+
+//LoadMonitorServiceCfg 根据配置文件加载监控服务信息
+func LoadMonitorServiceCfg(mc *MonitorCfg, ms *MonitorService, e *Email, cfgPath string) error {
+	if err := mc.LoadMonitorServiceCfg(cfgPath); err != nil {
+		return fmt.Errorf("LoadMonitorServiceCfg err:%s", err)
+	}
+
+	if err := mc.LoadMonitorComCfg(cfgPath); err != nil {
+		return fmt.Errorf("LoadMonitorComCfg err:%s", err)
+	}
+
+	e.UpdateEmail(mc.GetEmailData())
+	specServices := mc.GetSpecServices()
+	partServices := mc.GetPartServices()
+	ms.AddSpecService(specServices)
+	ms.AddPartService(partServices)
+	services := ms.GetMointorServices()
+	var str string
+	for _, service := range services {
+		str += service + "\n"
+	}
+	logSer.InfoDoo(fmt.Sprintf("LoadMonitorServiceCfg cur monitor services:%d\r\n%s", len(services), str))
+
+	return nil
+}
+
+//UpdateMonitorServiceCfg 配置文件修改时更新同时更新监控数据
+func UpdateMonitorServiceCfg(mc *MonitorCfg, ms *MonitorService, e *Email, cfgPath string) error {
+	if err := mc.LoadMonitorServiceCfg(cfgPath); err != nil {
+		return fmt.Errorf("LoadMonitorServiceCfg err:%s", err)
+	}
+
+	specServices := mc.GetSpecServices()
+	partServices := mc.GetPartServices()
+	ms.UpdateServices(specServices, partServices)
+	services := ms.GetMointorServices()
+	var str string
+	for _, service := range services {
+		str += service + "\n"
+	}
+	logSer.InfoDoo(fmt.Sprintf("UpdateMonitorServiceCfg cur monitor services:%d\r\n%s", len(services), str))
+
+	return nil
+}
+
+//UpdateMonitorServiceByCfg 用于定时任务定时刷新任务管理器中需要监控的服务
+func UpdateMonitorServiceByCfg(mc *MonitorCfg, ms *MonitorService) error {
+
+	specServices := mc.GetSpecServices()
+	partServices := mc.GetPartServices()
+	ms.UpdateServices(specServices, partServices)
+	services := ms.GetMointorServices()
+	var str string
+	for _, service := range services {
+		str += service + "\n"
+	}
+	logSer.InfoDoo(fmt.Sprintf("UpdateMonitorServiceByCfg cur monitor services:%d\r\n%s", len(services), str))
+
+	return nil
 }
 
 //StartMonitor 开始监控功能
@@ -102,7 +164,7 @@ func (ms *MonitorService) LoopCheck() {
 
 		status, err := service.Query()
 		if err != nil {
-			logdoo.ErrorDoo("Query service", service.Name, "err", err)
+			logSer.ErrorDoo("Query service", service.Name, "err", err)
 			if v, ok := ms.services[service.Name]; ok {
 				if v != nil {
 					ms.services[service.Name].Close()
@@ -160,7 +222,7 @@ func (ms *MonitorService) RefreshServiceHandle() {
 		if err == nil {
 			ms.scm = manager
 		} else {
-			logdoo.ErrorDoo("Open service manager err", err)
+			logSer.ErrorDoo("Open service manager err", err)
 			return
 		}
 	}
@@ -229,7 +291,7 @@ func (ms *MonitorService) AddSpecService(names []string) *[]string {
 		if err == nil {
 			ms.scm = manager
 		} else {
-			logdoo.ErrorDoo("Open service manager err", err)
+			logSer.ErrorDoo("Open service manager err", err)
 			return nil
 		}
 	}
@@ -246,7 +308,7 @@ func (ms *MonitorService) AddSpecService(names []string) *[]string {
 		if err != nil {
 			ms.services[name] = nil
 			ms.serviceState[name] = ServiceStoped
-			logdoo.WarnDoo("service:", name, "open err:", err)
+			logSer.WarnDoo("service:", name, "open err:", err)
 		} else {
 			ms.services[name] = service
 			ms.serviceState[name] = ServiceUnknow
@@ -273,7 +335,7 @@ func (ms *MonitorService) AddPartService(names []string) *[]string {
 
 	manager, err := mgr.Connect()
 	if err != nil {
-		logdoo.ErrorDoo("Open service manager err", err)
+		logSer.ErrorDoo("Open service manager err", err)
 		return nil
 	}
 	defer manager.Disconnect()
@@ -286,7 +348,7 @@ func (ms *MonitorService) AddPartService(names []string) *[]string {
 
 	services := make([]byte, needBuf)
 	if err := windows.EnumServicesStatusEx(windows.Handle(manager.Handle), windows.SC_ENUM_PROCESS_INFO, windows.SERVICE_WIN32, windows.SERVICE_STATE_ALL, (*byte)(unsafe.Pointer(&services[0])), needBuf, &needBuf, &serviceNum, nil, nil); err != nil {
-		logdoo.ErrorDoo("EnumServicesStatusEx get part service list fail err:", err)
+		logSer.ErrorDoo("EnumServicesStatusEx get part service list fail err:", err)
 		return nil
 	}
 
@@ -336,7 +398,7 @@ func (ms *MonitorService) AddPartService(names []string) *[]string {
 		if err != nil {
 			ms.services[name] = nil
 			ms.serviceState[name] = ServiceStoped
-			logdoo.WarnDoo("service:", name, "maybe not exist and open err:", err)
+			logSer.WarnDoo("service:", name, "maybe not exist and open err:", err)
 		} else {
 			ms.services[name] = s
 			ms.serviceState[name] = ServiceUnknow
@@ -376,6 +438,10 @@ func (ms *MonitorService) UpdateServices(specs, parts []string) {
 	ms.mu.Lock()
 	for k := range ms.services {
 		if _, ok := services[k]; !ok {
+			if ms.services[k] == nil {
+				delete(ms.services, k) //空资源的直接删除就好了
+				continue
+			}
 			ms.serviceDelChan <- *ms.services[k] //使用协程的方式去关闭释放一下不要监控的服务资源(因为有些本来正在启动中的服务，现在不需要监控了关闭系统句柄资源时会进行阻塞)
 			delete(ms.services, k)
 		}
@@ -419,13 +485,13 @@ func (ms *MonitorService) Addmonitor(i int, c *MonitorCfg, e *Email) {
 		select {
 		case service := <-ms.serviceAddChan[i]:
 			ms.SendEmail(service.Name, c, e)
-			logdoo.InfoDoo("goroutine", i, "begin restart service", service.Name)
+			logSer.InfoDoo("goroutine", i, "begin restart service", service.Name)
 			//service.Start 这个函数是阻塞式的,没有及时响应会导致30秒后超时
 			if er := service.Start([]string{service.Name}); er != nil {
-				logdoo.ErrorDoo("goroutine", i, "restart service", service.Name, "err", er)
+				logSer.ErrorDoo("goroutine", i, "restart service", service.Name, "err", er)
 				curState = ServiceStoped
 			} else {
-				logdoo.InfoDoo("goroutine", i, "restart service", service.Name, "success")
+				logSer.InfoDoo("goroutine", i, "restart service", service.Name, "success")
 				ms.UpdateSendEmailState(service.Name, false)
 				curState = ServiceRuning
 			}
@@ -445,7 +511,7 @@ func (ms *MonitorService) DelMonitor() {
 	for {
 		select {
 		case service := <-ms.serviceDelChan:
-			logdoo.InfoDoo("delete service:", service.Name, "monitor")
+			logSer.InfoDoo("delete service:", service.Name, "monitor")
 			service.Close()
 		}
 	}
@@ -454,7 +520,7 @@ func (ms *MonitorService) DelMonitor() {
 //SendEmail 发送邮件
 func (ms *MonitorService) SendEmail(name string, c *MonitorCfg, e *Email) {
 	if e == nil {
-		logdoo.WarnDoo("email instance is nil and can't send email please confirm!")
+		logSer.WarnDoo("email instance is nil and can't send email please confirm!")
 		return
 	}
 
@@ -473,7 +539,13 @@ func (ms *MonitorService) SendEmail(name string, c *MonitorCfg, e *Email) {
 		if GetAttachByPath(attach) != "" {
 			subject := "machine:" + c.GetMachineName() + " service: " + name + " has stop and restart!"
 			content := "<b>The crash file please the attach</b>"
-			e.SendEmailEx(subject, content, GetAttachByPath(attach))
+			if err, ok := e.SendEmailEx(subject, content, GetAttachByPath(attach)); err != nil {
+				logSer.InfoDoo(err)
+			} else {
+				if ok {
+					logSer.InfoDoo("send eamilEx ex success ==>> From:", e.GetSendU(), "To:", e.GetReceiveU(), "subject:", subject, "content:", content, "attach:", attach)
+				}
+			}
 			ms.serviceEmail[name] = true
 			return
 		}
@@ -481,7 +553,13 @@ func (ms *MonitorService) SendEmail(name string, c *MonitorCfg, e *Email) {
 
 	subject := "machine:" + c.GetMachineName() + " service: " + name + " has stop and restart!"
 	content := "<b>please handle</b>"
-	e.SendEmail(subject, content)
+	if err, ok := e.SendEmail(subject, content); err != nil {
+		logSer.InfoDoo(err)
+	} else {
+		if ok {
+			logSer.InfoDoo("send eamilEx ex success ==>> From:", e.GetSendU(), "To:", e.GetReceiveU(), "subject:", subject, "content:", content)
+		}
+	}
 	ms.serviceEmail[name] = true
 }
 
@@ -492,4 +570,49 @@ func (ms *MonitorService) UpdateSendEmailState(name string, state bool) {
 		ms.serviceEmail[name] = state
 	}
 	ms.mu.Unlock()
+}
+
+//GetAttachByPath 获取指定目录下的附件
+func GetAttachByPath(path string) (attach string) {
+	if !IsDir(path) {
+		return path
+	}
+
+	if !PathExists(path) {
+		logSer.ErrorDoo("path", path, "no exist")
+		return ""
+	}
+
+	attach, err := GetLastModFilesByPath(path)
+	if err != nil {
+		logSer.ErrorDoo("GetLastModFilesByPath err:", err, "attach path", path)
+		return ""
+	}
+
+	return attach
+}
+
+//GetLastModFilesByPath 获取指定目录下最后修改的文件
+func GetLastModFilesByPath(dirPth string) (files string, err error) {
+	dir, err := ioutil.ReadDir(dirPth)
+	if err != nil {
+		return "", err
+	}
+
+	PthSep := string(os.PathSeparator)
+	var tempFile os.FileInfo
+	for i, fi := range dir {
+		if !fi.IsDir() {
+			if i == 0 {
+				tempFile = fi
+			} else {
+				if tempFile.ModTime().Before(fi.ModTime()) {
+					tempFile = fi
+				}
+			}
+			files = dirPth + PthSep + tempFile.Name()
+		}
+	}
+
+	return files, nil
 }

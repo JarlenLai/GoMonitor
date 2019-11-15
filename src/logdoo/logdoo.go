@@ -96,17 +96,17 @@ type RotatingHandler struct {
 }
 
 //LogInfo 存储日记文件信息
-var LogInfo *RotatingHandler
+//var LogInfo *RotatingHandler
 
 //Console 控制台日记输出
-var Console *ConsoleHander
+//var Console *ConsoleHander
 
-func init() {
+/* func init() {
 	LogInfo = NewDayLogHandle(".", 500*1024*1024)
 	Console = NewConsoleHandler()
 	//添加
 	SetHandlers(Console, LogInfo)
-}
+} */
 
 //NewConsoleHandler New一个控制台日记变量
 func NewConsoleHandler() *ConsoleHander {
@@ -164,27 +164,27 @@ func NewDayLogHandle(dir string, maxSize int64) *RotatingHandler {
 		LogHandler: LogHandler{nil},
 		dir:        dir,
 		maxNum:     1,
-		maxSize:    maxSize,
+		maxSize:    maxSize * 1024 * 1024,
 		suffix:     0,
 	}
 
 	return h
 }
 
-func SetDayLogHandleDir(path string) {
-	LogInfo.mu.Lock()
-	LogInfo.dir = path
-	LogInfo.mu.Unlock()
+func (h *RotatingHandler) SetDayLogHandleDir(path string) {
+	h.mu.Lock()
+	h.dir = path
+	h.mu.Unlock()
 }
 
-func SetDayLogHandleFileSize(size int64) {
+func (h *RotatingHandler) SetDayLogHandleFileSize(size int64) {
 	if size <= 0 {
 		return
 	}
 
-	LogInfo.mu.Lock()
-	LogInfo.maxSize = size * 1024 * 1024
-	LogInfo.mu.Unlock()
+	h.mu.Lock()
+	h.maxSize = size * 1024 * 1024
+	h.mu.Unlock()
 }
 
 /*
@@ -237,23 +237,22 @@ func (l *LogHandler) SetPrefix(prefix string) {
 }
 
 func (l *LogHandler) DebugDoo(v ...interface{}) {
-	LogInfo.RenameDoo()
+	//LogInfo.RenameDoo()
 	l.lg.Output(3, fmt.Sprintln("debug", v, "\r\n"))
 }
 
 func (l *LogHandler) InfoDoo(v ...interface{}) {
-
-	LogInfo.RenameDoo()
+	//LogInfo.RenameDoo()
 	l.lg.OutputNoCallDep(fmt.Sprintln("info", v, "\r\n"))
 }
 
 func (l *LogHandler) WarnDoo(v ...interface{}) {
-	LogInfo.RenameDoo()
+	//LogInfo.RenameDoo()
 	l.lg.Output(3, fmt.Sprintln("warn", v, "\r\n"))
 }
 
 func (l *LogHandler) ErrorDoo(v ...interface{}) {
-	LogInfo.RenameDoo()
+	//LogInfo.RenameDoo()
 	l.lg.Output(3, fmt.Sprintln("error", v, "\r\n"))
 }
 
@@ -382,56 +381,95 @@ type _Logger struct {
 	mu       sync.Mutex
 }
 
-var logger = &_Logger{
+/* var logger = &_Logger{
 	handlers: []Handler{
 		Console,
 	},
 	level: DEBUG,
+} */
+
+func NewLogger() *_Logger {
+	return &_Logger{
+		handlers: []Handler{},
+		level:    DEBUG,
+	}
 }
 
 //SetHandlers 设置打印日记变量
-func SetHandlers(handlers ...Handler) {
+func (logger *_Logger) SetHandlers(handlers ...Handler) {
+	logger.mu.Lock()
 	logger.handlers = handlers
+	logger.mu.Unlock()
 }
 
-func SetLevel(level Level) {
+func (logger *_Logger) SetLevel(level Level) {
+	logger.mu.Lock()
 	logger.level = level
+	logger.mu.Unlock()
 }
 
-func DebugDoo(v ...interface{}) {
+func (logger *_Logger) DebugDoo(v ...interface{}) {
 	if logger.level <= DEBUG {
 		for i := range logger.handlers {
+			if t, ok := logger.handlers[i].(*RotatingHandler); ok {
+				t.RenameDoo()
+			}
 			logger.handlers[i].DebugDoo(v...)
 		}
 	}
 }
 
-func InfoDoo(v ...interface{}) {
+func (logger *_Logger) InfoDoo(v ...interface{}) {
 	if logger.level <= INFO {
 		for i := range logger.handlers {
+			if t, ok := logger.handlers[i].(*RotatingHandler); ok {
+				t.RenameDoo()
+			}
 			logger.handlers[i].InfoDoo(v...)
 		}
 	}
 }
 
-func WarnDoo(v ...interface{}) {
+func (logger *_Logger) WarnDoo(v ...interface{}) {
 	if logger.level <= WARN {
 		for i := range logger.handlers {
+			if t, ok := logger.handlers[i].(*RotatingHandler); ok {
+				t.RenameDoo()
+			}
 			logger.handlers[i].WarnDoo(v...)
 		}
 	}
 }
 
-func ErrorDoo(v ...interface{}) {
+func (logger *_Logger) ErrorDoo(v ...interface{}) {
 	if logger.level <= ERROR {
 		for i := range logger.handlers {
+			if t, ok := logger.handlers[i].(*RotatingHandler); ok {
+				t.RenameDoo()
+			}
 			logger.handlers[i].ErrorDoo(v...)
 		}
 	}
 }
 
-func Close() {
+func (logger *_Logger) Close() {
 	for i := range logger.handlers {
 		logger.handlers[i].close()
+	}
+}
+
+func (logger *_Logger) SetDayLogHandleDir(path string) {
+	for i := range logger.handlers {
+		if t, ok := logger.handlers[i].(*RotatingHandler); ok {
+			t.SetDayLogHandleDir(path)
+		}
+	}
+}
+
+func (logger *_Logger) SetDayLogHandleFileSize(size int64) {
+	for i := range logger.handlers {
+		if t, ok := logger.handlers[i].(*RotatingHandler); ok {
+			t.SetDayLogHandleFileSize(size)
+		}
 	}
 }

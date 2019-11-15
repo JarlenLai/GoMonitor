@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -8,11 +11,19 @@ import (
 	"github.com/ini"
 )
 
+const (
+	//文件类型切割符号
+	FileTypeSplit string = ","
+)
+
 //MonitorCfg 监控程序的配置结构
 type MonitorCfg struct {
 	machineName     string            //当前监控的机器名
 	serviceSpecName map[string]string //指定的service名字以及对应附件目录
 	servicePartName []string          //监控的包含指定前缀的服务
+	fileDir         map[string]string //需要监控的文件目录以及目录下的文件类型
+	fileSpec        []string          //需要监控的指定文件
+	logFileSize     int64             //日记文件大小
 	emailData       EmailData
 	refreshTime     int
 	mu              sync.RWMutex
@@ -22,11 +33,36 @@ type MonitorCfg struct {
 func NewMonitorCfg() *MonitorCfg {
 	return &MonitorCfg{serviceSpecName: make(map[string]string),
 		servicePartName: make([]string, 0),
+		fileDir:         make(map[string]string),
+		fileSpec:        make([]string, 0),
+		logFileSize:     800,
 		emailData:       EmailData{receiveU: make([]string, 0)}}
 }
 
-//LoadCfg 加载配置文件
-func (mcfg *MonitorCfg) LoadCfg(path string) error {
+//LoadAllCfg 加载配置文件中的所有配置
+func (mcfg *MonitorCfg) LoadAllCfg(path string) error {
+	strErr := ""
+	if err := mcfg.LoadMonitorServiceCfg(path); err != nil {
+		strErr += err.Error() + "\n"
+	}
+
+	if err := mcfg.LoadMonitorFileCfg(path); err != nil {
+		strErr += err.Error() + "\n"
+	}
+
+	if err := mcfg.LoadMonitorComCfg(path); err != nil {
+		strErr += err.Error() + "\n"
+	}
+
+	if strErr != "" {
+		return fmt.Errorf("%s", strErr)
+	} else {
+		return nil
+	}
+}
+
+//LoadMonitorServiceCfg 加载监控服务的配置
+func (mcfg *MonitorCfg) LoadMonitorServiceCfg(path string) error {
 	cfg, err := ini.Load(path)
 	if err != nil {
 		return err
@@ -35,16 +71,9 @@ func (mcfg *MonitorCfg) LoadCfg(path string) error {
 	mcfg.mu.Lock()
 	defer mcfg.mu.Unlock()
 
-	mcfg.machineName = "Unknow Machine Name"
-	if sec, er := cfg.GetSection("Machine"); er == nil {
-		if sec.HasKey("Name") {
-			mcfg.machineName = sec.Key("Name").Value()
-		}
-	}
-
 	mcfg.serviceSpecName = make(map[string]string)
 	mcfg.servicePartName = make([]string, 0)
-	if sec, er := cfg.GetSection("SpecInfo"); er == nil {
+	if sec, er := cfg.GetSection("MonitorServiceSpec"); er == nil {
 		var beforeSuffix = -1
 		keys := sec.Keys()
 		for _, key := range keys {
@@ -72,7 +101,7 @@ func (mcfg *MonitorCfg) LoadCfg(path string) error {
 		}
 	}
 
-	if sec, er := cfg.GetSection("PartInfo"); er == nil {
+	if sec, er := cfg.GetSection("MonitorServicePart"); er == nil {
 		keys := sec.Keys()
 		for _, key := range keys {
 			var suffix = 0
@@ -88,6 +117,95 @@ func (mcfg *MonitorCfg) LoadCfg(path string) error {
 		}
 	}
 
+	return nil
+}
+
+//LoadMonitorFileCfg 加载监控文件的配置
+func (mcfg *MonitorCfg) LoadMonitorFileCfg(path string) error {
+	cfg, err := ini.Load(path)
+	if err != nil {
+		return fmt.Errorf("Fail to load file ini file:%s, err:%s", path, err.Error())
+	}
+
+	mcfg.mu.Lock()
+	defer mcfg.mu.Unlock()
+
+	//监控目录的配置
+	sec, err := cfg.GetSection("MonitorFileDir")
+	if err == nil {
+		var count = 0
+		keys := sec.Keys()
+		for _, key := range keys {
+			prefix := "Type"
+			if strings.HasPrefix(key.Name(), "Path") {
+				prefix = "Path"
+			}
+			suffix := strings.TrimPrefix(key.Name(), prefix)
+			if j, _ := strconv.Atoi(suffix); count == j {
+				continue
+			}
+			count++
+			typen := "Type" + suffix
+			pathn := "Path" + suffix
+			if sec.HasKey(typen) && sec.HasKey(pathn) {
+				keyT := sec.Key(typen)
+				keyP := sec.Key(pathn)
+				dirpath := keyP.Value()
+				mcfg.fileDir[dirpath] = keyT.Value()
+			}
+		}
+	}
+
+	//指定监控文件的配置
+	sec, err = cfg.GetSection("MonitorFileSpec")
+	if err == nil {
+		keys := sec.Keys()
+		for _, key := range keys {
+			mcfg.fileSpec = append(mcfg.fileSpec, key.Value())
+		}
+	}
+
+	return nil
+}
+
+//LoadMonitorComCfg 加载公共配置信息
+func (mcfg *MonitorCfg) LoadMonitorComCfg(path string) error {
+	cfg, err := ini.Load(path)
+	if err != nil {
+		return fmt.Errorf("Fail to load file ini file:%s, err:%s", path, err.Error())
+	}
+
+	mcfg.mu.Lock()
+	defer mcfg.mu.Unlock()
+
+	mcfg.machineName = "Unknow Machine Name"
+	hasCfg := false
+	mcfg.refreshTime = 300
+	if sec, er := cfg.GetSection("CommonInfo"); er == nil {
+
+		//当前监控window机器的标识
+		if sec.HasKey("MachineName") {
+			mcfg.machineName = sec.Key("MachineName").Value()
+		}
+
+		//配置文件定时刷新时间
+		if sec.HasKey("RefreshCfgTime") {
+			mcfg.refreshTime, _ = sec.Key("RefreshCfgTime").Int()
+		}
+
+		//每个日记大小的配置
+		if v, er := sec.GetKey("LogFileSize"); er == nil {
+			if i, e := v.Int64(); e == nil {
+				mcfg.logFileSize = i
+				hasCfg = true
+			}
+		}
+		if !hasCfg {
+			mcfg.logFileSize = 0
+		}
+	}
+
+	//邮件配置信息
 	mcfg.emailData = EmailData{receiveU: make([]string, 0)}
 	if sec, er := cfg.GetSection("EmailInfo"); er == nil {
 		if sec.HasKey("Open") {
@@ -112,14 +230,28 @@ func (mcfg *MonitorCfg) LoadCfg(path string) error {
 		}
 	}
 
-	mcfg.refreshTime = 300
-	if sec, er := cfg.GetSection("Timer"); er == nil {
-		if sec.HasKey("RefreshCfg") {
-			mcfg.refreshTime, _ = sec.Key("RefreshCfg").Int()
+	return nil
+}
+
+//GetMonitorFileList 根据监控配置获取要监控的文件列表
+func (mcfg *MonitorCfg) GetMonitorFileList() []string {
+	files := make([]string, 0)
+	mcfg.mu.RLock()
+	defer mcfg.mu.RUnlock()
+
+	for k, v := range mcfg.fileDir {
+		suffixs := strings.Split(v, FileTypeSplit)
+		fs, err := GetAllFiles(k, suffixs)
+		if err == nil {
+			files = append(files, fs...)
 		}
 	}
 
-	return nil
+	if len(mcfg.fileSpec) > 0 {
+		files = append(files, mcfg.fileSpec...)
+	}
+
+	return files
 }
 
 //GetSpecServices 获取具体的监控服务名列表
@@ -158,7 +290,7 @@ func (mcfg *MonitorCfg) GetMachineName() (name string) {
 }
 
 //GetRefreshCfgTime 获取刷新时间
-func (mcfg *MonitorCfg) GetRefreshTime() int{ 
+func (mcfg *MonitorCfg) GetRefreshTime() int {
 	mcfg.mu.Lock()
 	t := mcfg.refreshTime
 	mcfg.mu.Unlock()
@@ -173,4 +305,43 @@ func (mcfg *MonitorCfg) GetServiceAttachPath(service string) (string, bool) {
 		return mcfg.serviceSpecName[service], true
 	}
 	return "", false
+}
+
+//GetAllFiles 获取指定目录下的所有文件,包含子目录下的文件
+func GetAllFiles(dirPth string, suffixs []string) (files []string, err error) {
+	var dirs []string
+	dir, err := ioutil.ReadDir(dirPth)
+	if err != nil {
+		return nil, err
+	}
+
+	PthSep := string(os.PathSeparator)
+	//suffix = strings.ToUpper(suffix) //忽略后缀匹配的大小写
+
+	for _, fi := range dir {
+		if fi.IsDir() { // 目录, 递归遍历
+			dirs = append(dirs, dirPth+PthSep+fi.Name())
+			GetAllFiles(dirPth+PthSep+fi.Name(), suffixs)
+		} else {
+			// 过滤指定格式
+			for _, suffix := range suffixs {
+				ok := strings.HasSuffix(fi.Name(), suffix)
+				if ok {
+					files = append(files, dirPth+PthSep+fi.Name())
+					break
+				}
+			}
+
+		}
+	}
+
+	// 读取子目录下文件
+	for _, table := range dirs {
+		temp, _ := GetAllFiles(table, suffixs)
+		for _, temp1 := range temp {
+			files = append(files, temp1)
+		}
+	}
+
+	return files, nil
 }

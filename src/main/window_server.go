@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"syscall"
+	"unsafe"
+
 	"github.com/btcsuite/winsvc/debug"
 	"github.com/btcsuite/winsvc/eventlog"
 	"github.com/btcsuite/winsvc/mgr"
 	"github.com/btcsuite/winsvc/svc"
 	"github.com/kardianos/service"
 	"golang.org/x/sys/windows"
-	"os"
-	"syscall"
-	"unsafe"
 )
 
 const (
@@ -35,7 +36,9 @@ func (p *program) Start(s service.Service) error {
 }
 
 func (p *program) run() {
-	ServerMain()
+	mainMonitorService()
+	mainMonitorFile()
+	WaitReloadCfg()
 }
 
 func (p *program) Stop(s service.Service) error {
@@ -45,9 +48,9 @@ func (p *program) Stop(s service.Service) error {
 
 func RunWindowService(status int) {
 	svcConfig := &service.Config{
-		Name:        "Doo_MonitorService",     //服务显示名称
-		DisplayName: "Doo_MonitorService",     //服务名称
-		Description: "Monitor window service", //服务描述
+		Name:        "Doo_MonitorService",        //服务显示名称
+		DisplayName: "Doo_MonitorService",        //服务名称
+		Description: "Go Monitor window service", //服务描述
 	}
 
 	if status == IsDebug {
@@ -82,7 +85,6 @@ func RunWindowService(status int) {
 	err = s.Run()
 	if err != nil {
 		elog.Error(windowlogID, fmt.Sprintf("service run err:%v", err))
-
 	}
 }
 

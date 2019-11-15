@@ -1,7 +1,7 @@
 package main
 
 import (
-	"logdoo"
+	"fmt"
 	"sync"
 
 	"github.com/gomail"
@@ -49,12 +49,12 @@ func (e *Email) UpdateEmail(ed *EmailData) {
 }
 
 //SendEmailEx 发送邮件并且附带附件
-func (e *Email) SendEmailEx(subject, content, attach string) {
+func (e *Email) SendEmailEx(subject, content, attach string) (error, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	if e.status != EmailOpen {
-		return
+		return nil, false
 	}
 
 	m := gomail.NewMessage()
@@ -67,19 +67,19 @@ func (e *Email) SendEmailEx(subject, content, attach string) {
 	d := gomail.NewDialer(e.host, e.port, e.sendU, e.sendP)
 
 	if err := d.DialAndSend(m); err != nil {
-		logdoo.InfoDoo("send eamilEx ex fail ==>> From:", e.sendU, "To:", e.receiveU, "subject:", subject, "content:", content, "attach:", attach)
-	} else {
-		logdoo.InfoDoo("send eamilEx ex success ==>> From:", e.sendU, "To:", e.receiveU, "subject:", subject, "content:", content, "attach:", attach)
+		return fmt.Errorf("send eamilEx ex fail ==>> From:%s To:%s subject:%s content:%s attach:%s", e.sendU, e.receiveU, subject, content, attach), true
 	}
+
+	return nil, true
 }
 
 //SendEmail 发送邮件
-func (e *Email) SendEmail(subject, content string) {
+func (e *Email) SendEmail(subject, content string) (error, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	if e.status != EmailOpen {
-		return
+		return nil, false
 	}
 
 	m := gomail.NewMessage()
@@ -91,8 +91,22 @@ func (e *Email) SendEmail(subject, content string) {
 	d := gomail.NewDialer(e.host, e.port, e.sendU, e.sendP)
 
 	if err := d.DialAndSend(m); err != nil {
-		logdoo.InfoDoo("send eamil ex fail ==>> From:", e.sendU, "To:", e.receiveU, "subject:", subject, "content:", content)
-	} else {
-		logdoo.InfoDoo("send eamil ex success ==>> From:", e.sendU, "To:", e.receiveU, "subject:", subject, "content:", content)
+		return fmt.Errorf("send eamilEx ex fail ==>> From:%s To:%s subject:%s content:%s", e.sendU, e.receiveU, subject, content), true
 	}
+
+	return nil, true
+}
+
+func (e *Email) GetSendU() string {
+	e.mu.RLock()
+	str := e.sendU
+	e.mu.RUnlock()
+	return str
+}
+
+func (e *Email) GetReceiveU() []string {
+	e.mu.RLock()
+	list := e.receiveU
+	e.mu.RUnlock()
+	return list
 }
