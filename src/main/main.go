@@ -112,9 +112,7 @@ func mainMonitorFile() {
 
 	paths := monitorCfg.GetMonitorFileList() //获取监控文件列表
 	paths = RemoveRep(paths)                 //去除重复文件
-
-	monitorFile.AddMonitorFile(paths)
-	go monitorFile.StartWatcher() //开始监控，并阻塞直到退出
+	monitorFile.StartWatcher(paths)          //开始监控，并阻塞直到退出
 }
 
 //WaitReloadCfg 配置文件修改时进行配置文件重载
@@ -147,6 +145,9 @@ func WaitReloadCfg() {
 
 			case FileCfgChange: //文件监控配置有修改
 				logFile.InfoDoo("FileCfgChange")
+				if err := UpdateMonitorFileCfg(monitorCfg, monitorFile, monitorEmail, cfgPath); err != nil {
+					logFile.ErrorDoo(err)
+				}
 
 			case ComCfgChange: //公共配置有修改
 				logFile.InfoDoo("CommonCfgChange")
@@ -170,7 +171,8 @@ func WaitReloadCfg() {
 
 		case <-monitorService.stopChan: //监控服务退出释放资源
 			monitorService.Release()
-			break
+		case <-monitorFile.stopChan: //监控文件退出释放资源
+			monitorFile.Release()
 		}
 	}
 }

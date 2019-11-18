@@ -22,16 +22,17 @@ type Diff struct {
 }
 
 type IniFile struct {
-	ini map[string]*ini.File
-	mu  sync.RWMutex
+	ini  map[string]*ini.File //ini文件路径以及对应的内容对象指针
+	list []string             //当前的ini文件列表
+	mu   sync.RWMutex
 }
 
 func NewIniFile() *IniFile {
-	var iniFile = &IniFile{}
-	iniFile.ini = make(map[string]*ini.File)
+	var iniFile = &IniFile{ini: make(map[string]*ini.File), list: make([]string, 0)}
 	return iniFile
 }
 
+//LoadMonitorIniFiles 加载要监控的ini文件列表(返回值添加成功的列表，以及出错的信息)
 func (file *IniFile) LoadMonitorIniFiles(pathList []string) ([]string, error) {
 	strErr := ""
 	iniFiles := make([]string, 0)
@@ -50,6 +51,8 @@ func (file *IniFile) LoadMonitorIniFiles(pathList []string) ([]string, error) {
 
 	}
 
+	file.list = pathList //赋值记录当前添加的最新的列表(不代表列表中的文件都添加成功)
+
 	if strErr != "" {
 		return iniFiles, fmt.Errorf("%s", strErr)
 	}
@@ -57,6 +60,7 @@ func (file *IniFile) LoadMonitorIniFiles(pathList []string) ([]string, error) {
 	return iniFiles, nil
 }
 
+//LoadMonitorIniFile 加载要监控的ini文件
 func (file *IniFile) LoadMonitorIniFile(path string) error {
 	if !IsIniFile(path) {
 		return fmt.Errorf("%s not is a ini file", path)
@@ -69,8 +73,55 @@ func (file *IniFile) LoadMonitorIniFile(path string) error {
 	file.mu.Lock()
 	defer file.mu.Unlock()
 	file.ini[path] = cfg
+	file.list = append(file.list, path)
 
 	return nil
+}
+
+//UpdateMonitorIniFile 更新监控的iniFile信息(返回值添加成功的列表，以及出错的信息)
+func (file *IniFile) UpdateMonitorIniFile(newList []string) ([]string, error) {
+	file.mu.Lock()
+	defer file.mu.Unlock()
+
+	oldList := file.list
+	delList := Difference(oldList, newList)
+	addList := Difference(newList, oldList)
+
+	//删除已经不需要的监控的ini文件信息
+	for _, path := range delList {
+		if _, ok := file.ini[path]; ok {
+			delete(file.ini, path)
+		}
+	}
+
+	//添加新的ini监控信息
+	strErr := ""
+	for _, path := range addList {
+		if IsIniFile(path) {
+			cfg, err := ini.Load(path)
+			if err != nil {
+				strErr += "Fail to load file ini file:" + path + "err:" + err.Error() + "\r\n"
+				continue
+			}
+			file.ini[path] = cfg
+		}
+	}
+
+	//当前存储监控的ini文件的信息
+	iniFiles := make([]string, 0)
+	for k, v := range file.ini {
+		if v != nil {
+			iniFiles = append(iniFiles, k)
+		}
+	}
+
+	file.list = newList //重新赋值记录当前添加的最新的列表(不代表列表中的文件都添加成功)
+
+	if strErr != "" {
+		return iniFiles, fmt.Errorf("UpdateMonitorIniFile:\r\n%s", strErr)
+	}
+
+	return iniFiles, nil
 }
 
 func (file *IniFile) IsExistsMonitorIniFile(path string) bool {
@@ -92,10 +143,11 @@ func IsIniFile(path string) bool {
 	return false
 }
 
+//CompareIniDiff 对比ini文件的差异，并返回差异结果
 func (file *IniFile) CompareIniDiff(path1, path2 string) ([]Diff, error) {
 	file.mu.RLock()
 	file1, ok1 := file.ini[path1]
-	if !ok1 {
+	if !ok1 || file1 == nil {
 		file.mu.RUnlock()
 		//file.ini not exists indicate path1 need to reload to file.ini
 		err := file.LoadMonitorIniFile(path1)
@@ -135,6 +187,7 @@ func (file *IniFile) CompareIniDiff(path1, path2 string) ([]Diff, error) {
 	return diff, nil
 }
 
+//GetIntersectSection 获取两个文件内容的section交集结果
 func GetIntersectSection(file1, file2 *ini.File) []string {
 	name1 := file1.SectionStrings()
 	name2 := file2.SectionStrings()

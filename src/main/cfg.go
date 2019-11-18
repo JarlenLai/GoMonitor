@@ -131,6 +131,7 @@ func (mcfg *MonitorCfg) LoadMonitorFileCfg(path string) error {
 	defer mcfg.mu.Unlock()
 
 	//监控目录的配置
+	mcfg.fileDir = make(map[string]string) //每次加载前先清除掉原来的
 	sec, err := cfg.GetSection("MonitorFileDir")
 	if err == nil {
 		var count = 0
@@ -157,6 +158,7 @@ func (mcfg *MonitorCfg) LoadMonitorFileCfg(path string) error {
 	}
 
 	//指定监控文件的配置
+	mcfg.fileSpec = make([]string, 0) //每次加载前先清除掉原来的
 	sec, err = cfg.GetSection("MonitorFileSpec")
 	if err == nil {
 		keys := sec.Keys()
