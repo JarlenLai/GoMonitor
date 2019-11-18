@@ -104,7 +104,6 @@ func UpdateMonitorServiceCfg(mc *MonitorCfg, ms *MonitorService, e *Email, cfgPa
 
 //UpdateMonitorServiceByCfg 用于定时任务定时刷新任务管理器中需要监控的服务
 func UpdateMonitorServiceByCfg(mc *MonitorCfg, ms *MonitorService) error {
-
 	specServices := mc.GetSpecServices()
 	partServices := mc.GetPartServices()
 	ms.UpdateServices(specServices, partServices)

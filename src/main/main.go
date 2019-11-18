@@ -117,6 +117,7 @@ func mainMonitorFile() {
 	go monitorFile.StartWatcher() //开始监控，并阻塞直到退出
 }
 
+//WaitReloadCfg 配置文件修改时进行配置文件重载
 func WaitReloadCfg() {
 
 	//获取配置文件目录
@@ -128,46 +129,53 @@ func WaitReloadCfg() {
 
 	hasModify := make(chan int)
 	defer close(hasModify)
+
 	timer := time.NewTicker(time.Duration(monitorCfg.GetRefreshTime()) * time.Second) //默认是5分钟刷新一次
+	defer timer.Stop()
+
 	go WatchCfgFile(cfgPath, hasModify)
 
 	for {
 		select {
 		case event := <-hasModify:
 			switch event {
-			case ServiceCfgChange:
+			case ServiceCfgChange: //服务监控配置有修改
 				logSer.InfoDoo("ServiceCfgChange")
 				if err := UpdateMonitorServiceCfg(monitorCfg, monitorService, monitorEmail, cfgPath); err != nil {
 					logSer.ErrorDoo(err)
 				}
-			case FileCfgChange:
+
+			case FileCfgChange: //文件监控配置有修改
 				logFile.InfoDoo("FileCfgChange")
-			case ComCfgChange:
+
+			case ComCfgChange: //公共配置有修改
 				logFile.InfoDoo("CommonCfgChange")
 				logSer.InfoDoo("CommonCfgChange")
-				if err := monitorCfg.LoadMonitorComCfg(cfgPath); err != nil {
+				if err := monitorCfg.LoadMonitorComCfg(cfgPath); err == nil {
+					monitorEmail.UpdateEmail(monitorCfg.GetEmailData()) //更新邮件配置
+				} else {
 					logFile.ErrorDoo("LoadMonitorComCfg err:", err)
 					logSer.ErrorDoo("LoadMonitorComCfg err:", err)
-				} else {
-					monitorEmail.UpdateEmail(monitorCfg.GetEmailData()) //更新邮件配置
 				}
 
 			default:
+				logFile.InfoDoo("WaitReloadCfg unknow event modify")
+				logSer.InfoDoo("WaitReloadCfg unknow event modify")
 			}
 
-		case <-timer.C:
+		case <-timer.C: //定时刷新服务监控列表
 			if err := UpdateMonitorServiceByCfg(monitorCfg, monitorService); err != nil {
 				logSer.ErrorDoo(err)
 			}
 
-		case <-monitorService.stopChan:
+		case <-monitorService.stopChan: //监控服务退出释放资源
 			monitorService.Release()
 			break
 		}
 	}
 }
 
-//CloseService 关闭说有服务并释放资源
+//CloseService 关闭所有服务并释放资源
 func CloseService() {
 	monitorService.stopChan <- true
 	monitorFile.stopChan <- true
@@ -184,12 +192,14 @@ func CloseService() {
 //WatchCfgFile 监控配置文件是否有被修改了
 func WatchCfgFile(cfgPath string, hasModify chan<- int) {
 
+	//new 一个文件监控对象
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		logSer.WarnDoo("watcher cfg file modify err:", err)
 	}
 	defer watcher.Close()
 
+	//new 一个ini文件监控对象
 	var mf = NewIniFileMonitor()
 	cfgFileMonitor := doofile.NewIniFile()
 	if _, err := cfgFileMonitor.LoadMonitorIniFiles([]string{cfgPath}); err != nil {
@@ -197,8 +207,17 @@ func WatchCfgFile(cfgPath string, hasModify chan<- int) {
 	}
 	mf.SetIniFileMonitor(cfgFileMonitor)
 
+	//cfg 文件监控停止通知
 	stop := make(chan int)
 	defer close(stop)
+
+	//cfg 文件变化通知处理(使用chan给对比监控协程传递新老文件名进行对比cfg文件当前的修改)
+	names := make(chan [2]string)
+	defer close(names)
+	go HandleCfgChange(names, mf, hasModify) //协程中有进行延时处理,保证是秒级的对比cfg文件新老差异(因为像notepad++修改文件就会进行先删除后添加的操作，这会导致检查到的是整个cfg所有的配置都有变化了)
+
+	//新老cfg配置文件名列表(只要不是重命名操作，新路径和老路径就都是一样的)
+	oldNewName := [2]string{"", ""}
 
 	//开协程监听文件是否别修改
 	go func() {
@@ -226,8 +245,11 @@ func WatchCfgFile(cfgPath string, hasModify chan<- int) {
 						isRename = false
 					}
 
+					//是ini Cfg文件就进行发信号处理对比当前cfg文件的修改了哪些内容
 					if doofile.IsIniFile(oldName) && doofile.IsIniFile(event.Name) {
-						HandleCfgChange(oldName, event.Name, mf, hasModify)
+						oldNewName[0] = oldName
+						oldNewName[1] = event.Name
+						names <- oldNewName
 					}
 				}
 
@@ -247,28 +269,46 @@ func WatchCfgFile(cfgPath string, hasModify chan<- int) {
 	<-stop
 }
 
-//HandleCfgChange 处理配置文件的修改操作
-func HandleCfgChange(oldName, newName string, mf *IniFileMonitor, hasModify chan<- int) {
-	secMap := mf.GetChangeSection(oldName, newName)
-	if _, ok := secMap["MonitorServiceSpec"]; ok {
-		hasModify <- ServiceCfgChange
-	} else if _, ok := secMap["MonitorServicePart"]; ok {
-		hasModify <- ServiceCfgChange
-	}
+//HandleCfgChange 处理配置文件的修改操作(通知是那部分的配置文件被修改了)
+func HandleCfgChange(names <-chan [2]string, mf *IniFileMonitor, hasModify chan<- int) {
 
-	if _, ok := secMap["MonitorFileDir"]; ok {
-		hasModify <- FileCfgChange
-	} else if _, ok := secMap["MonitorFileSpec"]; ok {
-		hasModify <- FileCfgChange
-	}
+	timer := time.NewTimer(1 * time.Second)
+	var nameOld string
+	var nameNew string
 
-	if _, ok := secMap["EmailInfo"]; ok {
-		hasModify <- ComCfgChange
-	} else if _, ok := secMap["CommonInfo"]; ok {
-		hasModify <- ComCfgChange
-	}
+	for {
+		select {
+		case n := <-names:
+			nameOld = n[0]
+			nameNew = n[1]
+			timer.Reset(1 * time.Second)
+		case <-timer.C:
+			if len(nameOld) == 0 || len(nameNew) == 0 {
+				continue
+			}
+			secMap := mf.GetChangeSection(nameOld, nameNew)
+			if _, ok := secMap["MonitorServiceSpec"]; ok {
+				hasModify <- ServiceCfgChange
+			} else if _, ok := secMap["MonitorServicePart"]; ok {
+				hasModify <- ServiceCfgChange
+			}
 
-	return
+			if _, ok := secMap["MonitorFileDir"]; ok {
+				hasModify <- FileCfgChange
+			} else if _, ok := secMap["MonitorFileSpec"]; ok {
+				hasModify <- FileCfgChange
+			}
+
+			if _, ok := secMap["EmailInfo"]; ok {
+				hasModify <- ComCfgChange
+			} else if _, ok := secMap["CommonInfo"]; ok {
+				hasModify <- ComCfgChange
+			}
+
+			nameOld = ""
+			nameNew = ""
+		}
+	}
 }
 
 //PathExists 判断路径是否存在
