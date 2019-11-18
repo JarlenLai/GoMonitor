@@ -39,6 +39,9 @@ func (p *program) run() {
 	mainMonitorService()
 	mainMonitorFile()
 	WaitReloadCfg()
+
+	logSer.InfoDoo("***monitor service run end***")
+	logFile.InfoDoo("***monitor service run end***")
 }
 
 func (p *program) Stop(s service.Service) error {

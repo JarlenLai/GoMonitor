@@ -17,26 +17,32 @@ const (
 )
 
 const (
-	ServiceCfgChange = 1
-	FileCfgChange    = 2
-	ComCfgChange     = 3
+	ServiceCfgChange = 1 //监控服务配置改变
+	FileCfgChange    = 2 //监控文件配置改变
+	ComCfgChange     = 3 //公共配置改变
 )
 
 const (
-	IsDebug   = 1
-	IsRelease = 2
+	IsDebug   = 1 //交互模式，debug
+	IsRelease = 2 //非交互模式，即window service模式
 )
 
-var monitorCfg = NewMonitorCfg()
-var monitorService = NewMonitorService()
-var monitorFile = NewMonitorFile()
-var monitorEmail = NewEmail()
+var RunMode int //运行模式，即IsDebug或者IsRelease
 
-var logSer = logdoo.NewLogger()
-var logFile = logdoo.NewLogger()
+var stopServiceChan = make(chan bool) //主进程退出通知
 
+var monitorCfg = NewMonitorCfg()         //监控当前程序的配置文件的变化
+var monitorService = NewMonitorService() //监控当前机器的window service
+var monitorFile = NewMonitorFile()       //监控文件的修改记录
+var monitorEmail = NewEmail()            //邮件功能
+
+var logSer = logdoo.NewLogger()  //监控服务log函数
+var logFile = logdoo.NewLogger() //监控文件log函数
+
+//函数入口
 func main() {
-	RunWindowService(IsDebug)
+	RunMode = IsRelease
+	RunWindowService(RunMode)
 }
 
 //mainMonitorService 监控服务主流程
@@ -44,8 +50,13 @@ func mainMonitorService() {
 	//初始化日记
 	if logPath, err := CreateLogDir("monitorServiceLog"); err == nil {
 		var logSerF = logdoo.NewDayLogHandle(logPath, 800)
-		var logSerC = logdoo.NewConsoleHandler()
-		logSer.SetHandlers(logSerC, logSerF)
+		if RunMode == IsDebug {
+			var logSerC = logdoo.NewConsoleHandler()
+			logSer.SetHandlers(logSerC, logSerF)
+		} else {
+			logSer.SetHandlers(logSerF) //不是交互模式不必打印信息到控制台
+		}
+
 	} else {
 		panic("CreateLogDir err")
 	}
@@ -81,8 +92,12 @@ func mainMonitorFile() {
 	//初始化日记
 	if logPath, err := CreateLogDir("monitorFileLog"); err == nil {
 		var logFileF = logdoo.NewDayLogHandle(logPath, 800)
-		var logFileC = logdoo.NewConsoleHandler()
-		logFile.SetHandlers(logFileC, logFileF)
+		if RunMode == IsDebug {
+			var logFileC = logdoo.NewConsoleHandler()
+			logFile.SetHandlers(logFileC, logFileF)
+		} else {
+			logFile.SetHandlers(logFileF) //不是交互模式不必打印信息到控制台
+		}
 	} else {
 		panic("CreateLogDir err")
 	}
@@ -111,7 +126,6 @@ func mainMonitorFile() {
 	}
 
 	paths := monitorCfg.GetMonitorFileList() //获取监控文件列表
-	paths = RemoveRep(paths)                 //去除重复文件
 	monitorFile.StartWatcher(paths)          //开始监控，并阻塞直到退出
 }
 
@@ -125,12 +139,15 @@ func WaitReloadCfg() {
 		return
 	}
 
+	//配置文件有被修改的通知
 	hasModify := make(chan int)
 	defer close(hasModify)
 
+	//配置文件定时刷新器
 	timer := time.NewTicker(time.Duration(monitorCfg.GetRefreshTime()) * time.Second) //默认是5分钟刷新一次
 	defer timer.Stop()
 
+	//启动配置文件监控协程
 	go WatchCfgFile(cfgPath, hasModify)
 
 	for {
@@ -169,20 +186,21 @@ func WaitReloadCfg() {
 				logSer.ErrorDoo(err)
 			}
 
-		case <-monitorService.stopChan: //监控服务退出释放资源
-			monitorService.Release()
-		case <-monitorFile.stopChan: //监控文件退出释放资源
-			monitorFile.Release()
+		case <-stopServiceChan: //整个服务退出
+			return
 		}
 	}
 }
 
-//CloseService 关闭所有服务并释放资源
+//CloseService 关闭所有服务并释放资源(资源释放后面还需考虑一下)
 func CloseService() {
-	monitorService.stopChan <- true
-	monitorFile.stopChan <- true
 	logSer.InfoDoo("***monitor service close***")
 	logFile.InfoDoo("***monitor service close***")
+	monitorService.stopChan <- true
+	monitorFile.stopChan <- true
+	stopServiceChan <- true
+	monitorService.Release()
+	monitorFile.Release()
 	if logSer != nil {
 		logSer.Close()
 	}

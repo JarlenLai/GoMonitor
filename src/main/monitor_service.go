@@ -35,7 +35,6 @@ type MonitorService struct {
 	serviceAddChanIndex map[int]bool            //记录改service的chan是否有在处理中
 	curAddChanIndex     int                     //记录最后一个用到的service的chan
 	serviceDelChan      chan mgr.Service        //处理当前要移除那个service的chan队列,要移除对那个service的监控就把该service放入这个chan中
-	stop                bool                    //监控功能是否停止了
 	stopChan            chan bool               //停止监控通知
 	mu                  sync.RWMutex
 }
@@ -54,7 +53,6 @@ func NewMonitorService() *MonitorService {
 		serviceAddChanIndex: make(map[int]bool, ServiceChanNum),
 		curAddChanIndex:     0,
 		serviceDelChan:      make(chan mgr.Service, 100),
-		stop:                false,
 		stopChan:            make(chan bool)}
 }
 
@@ -132,17 +130,15 @@ func (ms *MonitorService) StartMonitor(c *MonitorCfg, e *Email) {
 	go ms.DelMonitor()
 
 	go func(ms *MonitorService) {
-		ok := true
-		for ok {
-			ms.mu.RLock()
-			if ms.stop {
-				ok = false
+		ticker := time.NewTicker(10 * time.Millisecond)
+		for {
+			select {
+			case <-ms.stopChan:
+				return
+			case <-ticker.C:
+				ms.LoopCheck()
+				ms.RefreshServiceHandle()
 			}
-			ms.mu.RUnlock()
-
-			ms.LoopCheck()
-			ms.RefreshServiceHandle()
-			time.Sleep(10 * time.Millisecond)
 		}
 	}(ms)
 }
@@ -270,14 +266,12 @@ func (ms *MonitorService) Release() {
 		ms.scm.Disconnect()
 		ms.scm = nil
 	}
-
-	ms.stop = true
-
-	for i := 0; i < ServiceChanNum; i++ {
+	/* 	for i := 0; i < ServiceChanNum; i++ {
 		close(ms.serviceAddChan[i])
-	}
+	} */
 
-	close(ms.serviceDelChan)
+	//close(ms.serviceDelChan)
+	//close(ms.stopChan)
 }
 
 //AddSpecService 添加要监控的具体服务名列表

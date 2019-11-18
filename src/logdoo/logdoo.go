@@ -79,11 +79,6 @@ type ConsoleHander struct {
 	LogHandler
 }
 
-type FileHandler struct {
-	LogHandler
-	logfile *os.File
-}
-
 type RotatingHandler struct {
 	LogHandler
 	dir      string
@@ -95,32 +90,10 @@ type RotatingHandler struct {
 	mu       sync.Mutex
 }
 
-//LogInfo 存储日记文件信息
-//var LogInfo *RotatingHandler
-
-//Console 控制台日记输出
-//var Console *ConsoleHander
-
-/* func init() {
-	LogInfo = NewDayLogHandle(".", 500*1024*1024)
-	Console = NewConsoleHandler()
-	//添加
-	SetHandlers(Console, LogInfo)
-} */
-
 //NewConsoleHandler New一个控制台日记变量
 func NewConsoleHandler() *ConsoleHander {
 	l := New(os.Stderr, "", Ltime|Lmicroseconds|Lshortfile)
 	return &ConsoleHander{LogHandler: LogHandler{l}}
-}
-
-func NewFileHandler(filepath string) *FileHandler {
-	logfile, _ := os.OpenFile(filepath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
-	l := New(logfile, "", LstdFlags)
-	return &FileHandler{
-		LogHandler: LogHandler{l},
-		logfile:    logfile,
-	}
 }
 
 func NewRotatingHandler(dir string, filename string, maxNum int, maxSize int64) *RotatingHandler {
@@ -237,22 +210,18 @@ func (l *LogHandler) SetPrefix(prefix string) {
 }
 
 func (l *LogHandler) DebugDoo(v ...interface{}) {
-	//LogInfo.RenameDoo()
 	l.lg.Output(3, fmt.Sprintln("debug", v, "\r\n"))
 }
 
 func (l *LogHandler) InfoDoo(v ...interface{}) {
-	//LogInfo.RenameDoo()
 	l.lg.OutputNoCallDep(fmt.Sprintln("info", v, "\r\n"))
 }
 
 func (l *LogHandler) WarnDoo(v ...interface{}) {
-	//LogInfo.RenameDoo()
 	l.lg.Output(3, fmt.Sprintln("warn", v, "\r\n"))
 }
 
 func (l *LogHandler) ErrorDoo(v ...interface{}) {
-	//LogInfo.RenameDoo()
 	l.lg.Output(3, fmt.Sprintln("error", v, "\r\n"))
 }
 
@@ -317,12 +286,6 @@ func (l *LogHandler) close() {
 
 }
 
-func (h *FileHandler) close() {
-	if h.logfile != nil {
-		h.logfile.Close()
-	}
-}
-
 func (h *RotatingHandler) close() {
 	if h.logfile != nil {
 		h.logfile.Close()
@@ -380,13 +343,6 @@ type _Logger struct {
 	level    Level
 	mu       sync.Mutex
 }
-
-/* var logger = &_Logger{
-	handlers: []Handler{
-		Console,
-	},
-	level: DEBUG,
-} */
 
 func NewLogger() *_Logger {
 	return &_Logger{
