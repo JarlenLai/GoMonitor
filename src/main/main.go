@@ -6,14 +6,10 @@ import (
 	"logdoo"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fsnotify"
-)
-
-const (
-	WatcherModify = 1
-	WatcherStop   = 2
 )
 
 const (
@@ -41,7 +37,7 @@ var logFile = logdoo.NewLogger() //监控文件log函数
 
 //函数入口
 func main() {
-	RunMode = IsRelease
+	RunMode = IsRelease //如果要调试或者本地运行,请修改这里
 	RunWindowService(RunMode)
 }
 
@@ -143,12 +139,12 @@ func WaitReloadCfg() {
 	hasModify := make(chan int)
 	defer close(hasModify)
 
-	//配置文件定时刷新器
-	timer := time.NewTicker(time.Duration(monitorCfg.GetRefreshTime()) * time.Second) //默认是5分钟刷新一次
+	//定时刷新SCM任务管理器的定时器(针对新安装服务及时添加进入监控列表而无需重启服务)
+	timer := time.NewTicker(time.Duration(monitorCfg.GetRefreshSCMTime()) * time.Second) //默认是5分钟刷新一次
 	defer timer.Stop()
 
 	//启动配置文件监控协程
-	go WatchCfgFile(cfgPath, hasModify)
+	watcher := WatchCfgFile(cfgPath, hasModify)
 
 	for {
 		select {
@@ -187,6 +183,7 @@ func WaitReloadCfg() {
 			}
 
 		case <-stopServiceChan: //整个服务退出
+			watcher.Close()
 			return
 		}
 	}
@@ -196,11 +193,14 @@ func WaitReloadCfg() {
 func CloseService() {
 	logSer.InfoDoo("***monitor service close***")
 	logFile.InfoDoo("***monitor service close***")
+
+	stopServiceChan <- true
 	monitorService.stopChan <- true
 	monitorFile.stopChan <- true
-	stopServiceChan <- true
+
 	monitorService.Release()
 	monitorFile.Release()
+
 	if logSer != nil {
 		logSer.Close()
 	}
@@ -209,15 +209,15 @@ func CloseService() {
 	}
 }
 
-//WatchCfgFile 监控配置文件是否有被修改了
-func WatchCfgFile(cfgPath string, hasModify chan<- int) {
+//WatchCfgFile 监控配置文件是否有被修改了, 返回一个监控对象
+func WatchCfgFile(cfgPath string, hasModify chan<- int) *fsnotify.Watcher {
 
-	//new 一个文件监控对象
+	//new 一个文件监控对象,Watcher对象由外部调用者关闭
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		logSer.WarnDoo("watcher cfg file modify err:", err)
+		return nil
 	}
-	defer watcher.Close()
 
 	//new 一个ini文件监控对象
 	var mf = NewIniFileMonitor()
@@ -227,27 +227,20 @@ func WatchCfgFile(cfgPath string, hasModify chan<- int) {
 	}
 	mf.SetIniFileMonitor(cfgFileMonitor)
 
-	//cfg 文件监控停止通知
-	stop := make(chan int)
-	defer close(stop)
-
 	//cfg 文件变化通知处理(使用chan给对比监控协程传递新老文件名进行对比cfg文件当前的修改)
 	names := make(chan [2]string)
-	defer close(names)
 	go HandleCfgChange(names, mf, hasModify) //协程中有进行延时处理,保证是秒级的对比cfg文件新老差异(因为像notepad++修改文件就会进行先删除后添加的操作，这会导致检查到的是整个cfg所有的配置都有变化了)
 
-	//新老cfg配置文件名列表(只要不是重命名操作，新路径和老路径就都是一样的)
-	oldNewName := [2]string{"", ""}
-
 	//开协程监听文件是否别修改
-	go func() {
+	go func(ns chan [2]string, wt *fsnotify.Watcher) {
 		var oldName string
 		var isRename = false
+		oldNewName := [2]string{"", ""} //新老cfg配置文件名列表(只要不是重命名操作，新路径和老路径就都是一样的)
 		for {
 			select {
-			case event, ok := <-watcher.Events:
+			case event, ok := <-wt.Events:
 				if !ok {
-					stop <- WatcherStop
+					close(names) //如果退出就释放子协程
 					return
 				}
 
@@ -269,24 +262,24 @@ func WatchCfgFile(cfgPath string, hasModify chan<- int) {
 					if doofile.IsIniFile(oldName) && doofile.IsIniFile(event.Name) {
 						oldNewName[0] = oldName
 						oldNewName[1] = event.Name
-						names <- oldNewName
+						ns <- oldNewName
 					}
 				}
 
 			case _, ok := <-watcher.Errors:
 				if !ok {
-					stop <- WatcherStop
+					close(names) //如果退出就释放子协程
 					return
 				}
 			}
 		}
-	}()
+	}(names, watcher)
 
 	if err := watcher.Add(cfgPath); err != nil {
 		logSer.WarnDoo("Add watcher cfg file modify err:", err)
 	}
 
-	<-stop
+	return watcher
 }
 
 //HandleCfgChange 处理配置文件的修改操作(通知是那部分的配置文件被修改了)
@@ -298,7 +291,11 @@ func HandleCfgChange(names <-chan [2]string, mf *IniFileMonitor, hasModify chan<
 
 	for {
 		select {
-		case n := <-names:
+		case n, ok := <-names:
+			if !ok {
+				timer.Stop()
+				return //主协程已经退出，该子协程也要退出
+			}
 			nameOld = n[0]
 			nameNew = n[1]
 			timer.Reset(1 * time.Second)
@@ -306,23 +303,16 @@ func HandleCfgChange(names <-chan [2]string, mf *IniFileMonitor, hasModify chan<
 			if len(nameOld) == 0 || len(nameNew) == 0 {
 				continue
 			}
-			secMap := mf.GetChangeSection(nameOld, nameNew)
-			if _, ok := secMap["MonitorServiceSpec"]; ok {
-				hasModify <- ServiceCfgChange
-			} else if _, ok := secMap["MonitorServicePart"]; ok {
-				hasModify <- ServiceCfgChange
-			}
 
-			if _, ok := secMap["MonitorFileDir"]; ok {
-				hasModify <- FileCfgChange
-			} else if _, ok := secMap["MonitorFileSpec"]; ok {
-				hasModify <- FileCfgChange
-			}
-
-			if _, ok := secMap["EmailInfo"]; ok {
-				hasModify <- ComCfgChange
-			} else if _, ok := secMap["CommonInfo"]; ok {
-				hasModify <- ComCfgChange
+			secMap := mf.GetChangeSection(nameOld, nameNew) //获取是配置文件的那部分配置有修改了并进行通知
+			for k := range secMap {
+				if strings.HasPrefix(k, "MonitorService") {
+					hasModify <- ServiceCfgChange
+				} else if strings.HasPrefix(k, "MonitorFile") {
+					hasModify <- FileCfgChange
+				} else if strings.HasPrefix(k, "Common") {
+					hasModify <- ComCfgChange
+				}
 			}
 
 			nameOld = ""
@@ -386,16 +376,26 @@ func GetCfgPath() (string, error) {
 		}
 		defer file.Close()
 
-		initContent := "#[Machine] 当前机器的标识名称\r\n" +
-			"#[SpecInfo] 指定具体监控服务名Name(x) 以及该服务重启时需发送的附件Attach(x)\r\n" +
-			"#[PartInfo] 指定监控服务名Name(x),支持模糊匹配(即service1表示监控含有service1开头的所有服务)，支持!运算(即!service1表示不监控含有service1名开头的服务)\r\n" +
-			"#[EmailInfo] 邮件配置信息\r\n" +
-			"#[Timer] 定时任务配置,其中RefreshCfg表示多少秒刷新监控的service,改参数修改需要重启服务后生效\r\n\n" +
-			"[Machine]\r\nName=TradeA\r\n\n" +
-			"[SpecInfo]\r\nName1=myservice\r\nAttach1=D:\\MyService\\Log\r\n\n" +
-			"[PartInfo]\r\nName1=Doo_\r\nName2=!Doo_MonitorService\r\n\n" +
-			"[EmailInfo]\r\nOpen=0\r\nHost=smtp.qq.com\r\nPort=25\r\nSendU=eamil@qq.com\r\nSendP=password\r\nReceiveU=email1@163.com,email2@qq.com\r\n\n" +
-			"[Timer]\r\nRefresh=300"
+		initContent := "#公共配置CommonXXX\r\n" +
+			"#<MachineName> 当前机器的标识名称(非必填,用于邮件通知功能的标题)\r\n" +
+			"#<LogFileSize> 每个日记文件的大小(单位M)，超过该阀值的日记文件就会进行重命名_(n)\r\n" +
+			"#[CommonEmail] 邮件配置信息(非必填，open=0不开启用邮件通知功能, open=1开启邮件通知功能)\r\n" +
+			"[CommonData]\r\nMachineName=Trade_A\r\nLogFileSize=800\r\n" +
+			"[CommonEmail]\r\nOpen=0\r\nHost=smtp.qq.com\r\nPort=25\r\nSendU=eamil@qq.com\r\nSendP=password\r\nReceiveU=email1@163.com,email2@qq.com\r\n\n" +
+
+			"#服务监控配置MonitorServiceXXX\r\n" +
+			"#[MonitorServiceSpec] 指定具体监控服务名Name(n) 以及该服务重启时需发送的附件Attach(n)\r\n" +
+			"#[MonitorServicePart] 指定监控服务名Name(n),支持模糊匹配(即service1表示监控含有service1开头的所有服务)，支持!运算(即!service1表示不监控含有service1名开头的服务)\r\n" +
+			"#<RefreshSCMTime> 定时多少秒刷新任务管理器中监控列表的时间(主要针对新安装服务在安装后不用重启监控服务即可加入监控的功能),该值需重启生效。建议调大点(毕竟不经常安装服务)\r\n" +
+			"[MonitorServiceSpec]\r\nName1=service1\r\nAttach1=F:\\service1\\crash\r\n" +
+			"[MonitorServicePart]\r\nName1=!Doo_MonitorService\r\nName2=Doo_\r\n" +
+			"[MonitorServiceTimer]\r\nRefreshSCMTime=300\r\n\n" +
+
+			"#文件监控配置MonitorFileXXX(切记不要监控本程序自身的日记文件会导致死循环监控)\r\n" +
+			"#[MonitorFileDir]Type(n)+Path(n)=要监控的具体文件\r\n" +
+			"#[MonitorSpecFile]特别指定的监控文件\r\n" +
+			"[MonitorFileDir]\r\nType1=ini,exe\r\nPath1=F:\\Monitor\r\nType2=ini,exe\r\nPath2=F:\\Monitor\r\n" +
+			"[MonitorFileSpec]\r\nFile1=F:\\Monitor\\Jarlen1.txt\r\nFile3=F:\\Monitor\\Jarlen3.txt\r\n"
 
 		file.WriteString(initContent)
 	}

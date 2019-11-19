@@ -25,7 +25,7 @@ type MonitorCfg struct {
 	fileSpec        []string          //需要监控的指定文件
 	logFileSize     int64             //日记文件大小
 	emailData       EmailData
-	refreshTime     int
+	refreshSCMTime  int
 	mu              sync.RWMutex
 }
 
@@ -117,6 +117,14 @@ func (mcfg *MonitorCfg) LoadMonitorServiceCfg(path string) error {
 		}
 	}
 
+	mcfg.refreshSCMTime = 300
+	if sec, er := cfg.GetSection("MonitorServiceTimer"); er == nil {
+		//定时刷新任务管理器中要监控的service的时间(主要针对新安装的并且需要监控的服务)
+		if sec.HasKey("RefreshSCMTime") {
+			mcfg.refreshSCMTime, _ = sec.Key("RefreshSCMTime").Int()
+		}
+	}
+
 	return nil
 }
 
@@ -182,17 +190,11 @@ func (mcfg *MonitorCfg) LoadMonitorComCfg(path string) error {
 
 	mcfg.machineName = "Unknow Machine Name"
 	hasCfg := false
-	mcfg.refreshTime = 300
-	if sec, er := cfg.GetSection("CommonInfo"); er == nil {
+	if sec, er := cfg.GetSection("CommonData"); er == nil {
 
 		//当前监控window机器的标识
 		if sec.HasKey("MachineName") {
 			mcfg.machineName = sec.Key("MachineName").Value()
-		}
-
-		//配置文件定时刷新时间
-		if sec.HasKey("RefreshCfgTime") {
-			mcfg.refreshTime, _ = sec.Key("RefreshCfgTime").Int()
 		}
 
 		//每个日记大小的配置
@@ -209,7 +211,7 @@ func (mcfg *MonitorCfg) LoadMonitorComCfg(path string) error {
 
 	//邮件配置信息
 	mcfg.emailData = EmailData{receiveU: make([]string, 0)}
-	if sec, er := cfg.GetSection("EmailInfo"); er == nil {
+	if sec, er := cfg.GetSection("CommonEmail"); er == nil {
 		if sec.HasKey("Open") {
 			mcfg.emailData.status, _ = sec.Key("Open").Int()
 		}
@@ -292,10 +294,10 @@ func (mcfg *MonitorCfg) GetMachineName() (name string) {
 	return name
 }
 
-//GetRefreshCfgTime 获取刷新时间
-func (mcfg *MonitorCfg) GetRefreshTime() int {
+//GetRefreshSCMTime 获取刷新任务管理器中service的时间(针对新安装服务及时加入监控)
+func (mcfg *MonitorCfg) GetRefreshSCMTime() int {
 	mcfg.mu.Lock()
-	t := mcfg.refreshTime
+	t := mcfg.refreshSCMTime
 	mcfg.mu.Unlock()
 	return t
 }

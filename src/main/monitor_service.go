@@ -115,6 +115,29 @@ func UpdateMonitorServiceByCfg(mc *MonitorCfg, ms *MonitorService) error {
 	return nil
 }
 
+//Release 释放资源
+func (ms *MonitorService) Release() {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	for k, v := range ms.services {
+		if v != nil {
+			v.Close()
+			delete(ms.services, k) //关闭打开的资源句柄
+		}
+	}
+
+	if ms.scm != nil {
+		ms.scm.Disconnect() //关闭任务管理器句柄
+		ms.scm = nil
+	}
+	for i := 0; i < ServiceChanNum; i++ {
+		close(ms.serviceAddChan[i])
+	}
+
+	close(ms.serviceDelChan)
+	close(ms.stopChan)
+}
+
 //StartMonitor 开始监控功能
 func (ms *MonitorService) StartMonitor(c *MonitorCfg, e *Email) {
 
@@ -124,13 +147,16 @@ func (ms *MonitorService) StartMonitor(c *MonitorCfg, e *Email) {
 	}
 
 	for i := 0; i < ServiceChanNum; i++ {
-		go ms.Addmonitor(i, c, e)
+		go ms.Addmonitor(i, c, e) //处理开始监控的协程
 	}
 
+	//删除监控的协程
 	go ms.DelMonitor()
 
+	//协程开始监控service的状态
 	go func(ms *MonitorService) {
-		ticker := time.NewTicker(10 * time.Millisecond)
+		ticker := time.NewTicker(10 * time.Millisecond) //每10毫秒刷新一遍
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ms.stopChan:
@@ -249,29 +275,6 @@ func (ms *MonitorService) RefreshMgrHandle() {
 			ms.scm = manager
 		}
 	}
-}
-
-//Release 释放资源
-func (ms *MonitorService) Release() {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-	for k, v := range ms.services {
-		if v != nil {
-			v.Close()
-			delete(ms.services, k)
-		}
-	}
-
-	if ms.scm != nil {
-		ms.scm.Disconnect()
-		ms.scm = nil
-	}
-	/* 	for i := 0; i < ServiceChanNum; i++ {
-		close(ms.serviceAddChan[i])
-	} */
-
-	//close(ms.serviceDelChan)
-	//close(ms.stopChan)
 }
 
 //AddSpecService 添加要监控的具体服务名列表
@@ -476,9 +479,17 @@ func (ms *MonitorService) Addmonitor(i int, c *MonitorCfg, e *Email) {
 	var curState = ServiceUnknow
 	for {
 		select {
-		case service := <-ms.serviceAddChan[i]:
+		case service, ok := <-ms.serviceAddChan[i]:
+			if !ok {
+				break //chan被close了就退出了
+			}
+
+			if service.Name == "" || service.Handle == 0 {
+				logSer.InfoDoo("Addmonitor goroutine", i, "service is nil")
+				continue
+			}
+			logSer.InfoDoo("goroutine", i, "begin restart service", service.Name, service.Handle)
 			ms.SendEmail(service.Name, c, e)
-			logSer.InfoDoo("goroutine", i, "begin restart service", service.Name)
 			//service.Start 这个函数是阻塞式的,没有及时响应会导致30秒后超时
 			if er := service.Start([]string{service.Name}); er != nil {
 				logSer.ErrorDoo("goroutine", i, "restart service", service.Name, "err", er)
@@ -503,7 +514,10 @@ func (ms *MonitorService) Addmonitor(i int, c *MonitorCfg, e *Email) {
 func (ms *MonitorService) DelMonitor() {
 	for {
 		select {
-		case service := <-ms.serviceDelChan:
+		case service, ok := <-ms.serviceDelChan:
+			if !ok {
+				break //chanl被close就退出
+			}
 			logSer.InfoDoo("delete service:", service.Name, "monitor")
 			service.Close()
 		}
