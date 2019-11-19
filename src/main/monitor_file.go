@@ -200,12 +200,11 @@ func (files *MonitorFile) StartWatcher(paths []string) {
 	}
 	files.mu.Unlock()
 
-	logFile.InfoDoo("cur monitor file num:", len(iniFiles))
 	var str string
 	for _, iniFile := range iniFiles {
 		str += iniFile + "\n"
 	}
-	logFile.InfoDoo("monifile file list:\r\n", str)
+	logFile.InfoDoo(fmt.Sprintf("cur monifile file list:%d\r\n%s", len(iniFiles), str))
 
 	//定时检查并对添加监控失败的文件进行重新监控
 	go func() {

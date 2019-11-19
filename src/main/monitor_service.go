@@ -202,18 +202,25 @@ func (ms *MonitorService) LoopCheck() {
 	}
 	ms.mu.Unlock()
 
+	index := 0
 	for _, service := range sers {
-		ms.serviceAddChan[ms.GetIdleChanIndex()] <- service
+		if index = ms.GetIdleChanIndex(); index < 0 {
+			continue
+		}
+		ms.serviceAddChan[index] <- service
 	}
 }
 
-//GetIdleChanIndex 获取空闲的ChanIndex(内部会死循环直到能获取到)
+//GetIdleChanIndex 获取空闲的ChanIndex(轮训一圈都没找到就退出)
 func (ms *MonitorService) GetIdleChanIndex() int {
 	ok := true
 	v := false
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	for ok {
+	count := 0
+
+	//轮训一圈都没找到就退出
+	for count != ServiceChanNum {
 		if v, ok = ms.serviceAddChanIndex[ms.curAddChanIndex]; ok {
 			if v == false {
 				index := ms.curAddChanIndex
@@ -223,9 +230,11 @@ func (ms *MonitorService) GetIdleChanIndex() int {
 			}
 			ms.curAddChanIndex = (ms.curAddChanIndex + 1) % ServiceChanNum
 		}
+
+		count++
 	}
 
-	return 0
+	return -1
 }
 
 //RefreshServiceHandle 刷新监控服务的操作句柄
@@ -362,6 +371,10 @@ func (ms *MonitorService) AddPartService(names []string) *[]string {
 		//排除不要监控的文件名前缀的服务
 		filter := false
 		for _, n := range noMonitorNames {
+			if n == "" {
+				continue
+			}
+
 			if strings.HasPrefix(name, n) {
 				filter = true
 				break
@@ -374,6 +387,10 @@ func (ms *MonitorService) AddPartService(names []string) *[]string {
 		//只监控对应需要监控前缀名的服务
 		match := false
 		for _, n := range monitorNames {
+			if n == "" {
+				continue
+			}
+
 			if strings.HasPrefix(name, n) {
 				match = true
 				break

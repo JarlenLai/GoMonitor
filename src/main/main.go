@@ -151,13 +151,13 @@ func WaitReloadCfg() {
 		case event := <-hasModify:
 			switch event {
 			case ServiceCfgChange: //服务监控配置有修改
-				logSer.InfoDoo("ServiceCfgChange")
+				logSer.InfoDoo("MonitorServiceCfgChange")
 				if err := UpdateMonitorServiceCfg(monitorCfg, monitorService, monitorEmail, cfgPath); err != nil {
 					logSer.ErrorDoo(err)
 				}
 
 			case FileCfgChange: //文件监控配置有修改
-				logFile.InfoDoo("FileCfgChange")
+				logFile.InfoDoo("MonitorFileCfgChange")
 				if err := UpdateMonitorFileCfg(monitorCfg, monitorFile, monitorEmail, cfgPath); err != nil {
 					logFile.ErrorDoo(err)
 				}
@@ -198,7 +198,6 @@ func CloseService() {
 	stopServiceChan <- true
 	monitorService.stopChan <- true
 	monitorFile.stopChan <- true
-
 	monitorService.Release()
 	monitorFile.Release()
 
