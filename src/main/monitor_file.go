@@ -220,6 +220,13 @@ func (files *MonitorFile) StartWatcher(paths []string) {
 
 }
 
+//Release 释放资源
+func (files *MonitorFile) Release() {
+	if files.watcher != nil {
+		files.watcher.Close()
+	}
+}
+
 //GetMonitorFiles 获取当前的监控文件列表
 func (files *MonitorFile) GetMonitorFiles() []string {
 	list := make([]string, 0)
@@ -232,13 +239,6 @@ func (files *MonitorFile) GetMonitorFiles() []string {
 	files.mu.Unlock()
 
 	return list
-}
-
-//Release 释放资源
-func (files *MonitorFile) Release() {
-	if files.watcher != nil {
-		files.watcher.Close()
-	}
 }
 
 //SetIniFileMonitor 赋值监控的ini文件列表信息

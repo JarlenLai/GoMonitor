@@ -178,6 +178,7 @@ func WaitReloadCfg() {
 			}
 
 		case <-timer.C: //定时刷新服务监控列表
+			logSer.InfoDoo("On Ticker Duration", monitorCfg.GetRefreshSCMTime(), "Second")
 			if err := UpdateMonitorServiceByCfg(monitorCfg, monitorService); err != nil {
 				logSer.ErrorDoo(err)
 			}
@@ -385,7 +386,7 @@ func GetCfgPath() (string, error) {
 
 			"#服务监控配置MonitorServiceXXX\r\n" +
 			"#[MonitorServiceSpec] 指定具体监控服务名Name(n) 以及该服务重启时需发送的附件Attach(n)\r\n" +
-			"#[MonitorServicePart] 指定监控服务名Name(n),支持模糊匹配(即service1表示监控含有service1开头的所有服务)，支持!运算(即!service1表示不监控含有service1名开头的服务)\r\n" +
+			"#[MonitorServicePart] 指定监控服务名Name(n),支持模糊匹配(即service1表示监控含有service1开头的所有服务),支持!运算(即!service1表示不监控含有service1名开头的服务)\r\n" +
 			"#<RefreshSCMTime> 定时多少秒刷新任务管理器中监控列表的时间(主要针对新安装服务在安装后不用重启监控服务即可加入监控的功能),该值需重启生效。建议调大点(毕竟不经常安装服务)\r\n" +
 			"[MonitorServiceSpec]\r\nName1=service1\r\nAttach1=F:\\service1\\crash\r\n" +
 			"[MonitorServicePart]\r\nName1=!Doo_MonitorService\r\nName2=Doo_\r\n" +
@@ -393,9 +394,9 @@ func GetCfgPath() (string, error) {
 
 			"#文件监控配置MonitorFileXXX(切记不要监控本程序自身的日记文件会导致死循环监控)\r\n" +
 			"#[MonitorFileDir]Type(n)+Path(n)=要监控的具体文件\r\n" +
-			"#[MonitorSpecFile]特别指定的监控文件\r\n" +
+			"#[MonitorFileSpec]指定具体的监控文件,支持!运算(即!fileName表示不监控fileName文件)\r\n" +
 			"[MonitorFileDir]\r\nType1=ini,exe\r\nPath1=F:\\Monitor\r\nType2=ini,exe\r\nPath2=F:\\Monitor\r\n" +
-			"[MonitorFileSpec]\r\nFile1=F:\\Monitor\\Jarlen1.txt\r\nFile3=F:\\Monitor\\Jarlen3.txt\r\n"
+			"[MonitorFileSpec]\r\nFile1=F:\\Monitor1\\Jarlen1.txt\r\nFile3=!F:\\Monitor\\Jarlen3.txt\r\n"
 
 		file.WriteString(initContent)
 	}

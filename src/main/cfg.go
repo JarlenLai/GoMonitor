@@ -240,6 +240,9 @@ func (mcfg *MonitorCfg) LoadMonitorComCfg(path string) error {
 //GetMonitorFileList 根据监控配置获取要监控的文件列表
 func (mcfg *MonitorCfg) GetMonitorFileList() []string {
 	files := make([]string, 0)
+	mFiles := make(map[string]bool) //使用map类型去除重复元素
+	filters := make([]string, 0)
+
 	mcfg.mu.RLock()
 	defer mcfg.mu.RUnlock()
 
@@ -247,13 +250,31 @@ func (mcfg *MonitorCfg) GetMonitorFileList() []string {
 		suffixs := strings.Split(v, FileTypeSplit)
 		fs, err := GetAllFiles(k, suffixs)
 		if err == nil {
-			files = append(files, fs...)
+			for _, f := range fs {
+				mFiles[f] = true
+			}
 		}
 	}
 
-	if len(mcfg.fileSpec) > 0 {
-		files = append(files, mcfg.fileSpec...)
-		files = RemoveRep(files) //去除重复文件
+	for _, f := range mcfg.fileSpec {
+		if strings.HasPrefix(f, "!") {
+			f = strings.TrimPrefix(f, "!")
+			filters = append(filters, f) //需要过滤的文件
+			continue
+		}
+		mFiles[f] = true
+	}
+
+	//剔除需要过滤的文件
+	for _, f := range filters {
+		if _, ok := mFiles[f]; ok {
+			delete(mFiles, f)
+		}
+	}
+
+	//map转成slice元素返回
+	for f, _ := range mFiles {
+		files = append(files, f)
 	}
 
 	return files
@@ -314,7 +335,6 @@ func (mcfg *MonitorCfg) GetServiceAttachPath(service string) (string, bool) {
 
 //GetAllFiles 获取指定目录下的所有文件,包含子目录下的文件
 func GetAllFiles(dirPth string, suffixs []string) (files []string, err error) {
-	var dirs []string
 	dir, err := ioutil.ReadDir(dirPth)
 	if err != nil {
 		return nil, err
@@ -325,8 +345,9 @@ func GetAllFiles(dirPth string, suffixs []string) (files []string, err error) {
 
 	for _, fi := range dir {
 		if fi.IsDir() { // 目录, 递归遍历
-			dirs = append(dirs, dirPth+PthSep+fi.Name())
-			GetAllFiles(dirPth+PthSep+fi.Name(), suffixs)
+			if ls, err := GetAllFiles(dirPth+PthSep+fi.Name(), suffixs); err == nil {
+				files = append(files, ls...)
+			}
 		} else {
 			// 过滤指定格式
 			for _, suffix := range suffixs {
@@ -336,15 +357,6 @@ func GetAllFiles(dirPth string, suffixs []string) (files []string, err error) {
 					break
 				}
 			}
-
-		}
-	}
-
-	// 读取子目录下文件
-	for _, table := range dirs {
-		temp, _ := GetAllFiles(table, suffixs)
-		for _, temp1 := range temp {
-			files = append(files, temp1)
 		}
 	}
 
