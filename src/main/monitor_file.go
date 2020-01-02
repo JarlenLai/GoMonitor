@@ -210,11 +210,13 @@ func (files *MonitorFile) StartWatcher(paths []string, cfg *MonitorCfg) {
 						//对于被删除的ini文件进行恢复
 						if recoverFlag == 1 && doofile.IsIniFile(event.Name) {
 							if err := files.iniFile.iniFile.RecoverFile(event.Name); err == nil {
-								files.FilejoinWatcher(event.Name) //恢复成功的文件重新加入监控中
+								files.FilejoinWatcher(event.Name) //恢复成功的文件重新加入监控中,这个有时候内部的watcher.Add会导致阻塞
 								logFile.InfoDoo("Remove file:", event.Name, "recover Ok")
 							} else {
 								logFile.InfoDoo("Remove file:", event.Name, "recover err:", err)
 							}
+						} else {
+							logFile.InfoDoo("Remove file Op end")
 						}
 					}
 				} else {
