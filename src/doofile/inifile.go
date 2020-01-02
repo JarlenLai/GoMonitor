@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/ini"
+
 )
 
 const (
@@ -185,6 +186,21 @@ func (file *IniFile) CompareIniDiff(path1, path2 string) ([]Diff, error) {
 	file.ini[path2] = file2
 
 	return diff, nil
+}
+
+//RecoverFile ini文件被删除时恢复该ini文件内容
+func (file *IniFile) RecoverFile(path1 string) error {
+	file.mu.RLock()
+	defer file.mu.RUnlock()
+	file1, ok1 := file.ini[path1]
+	if !ok1 || file1 == nil {
+		//file.ini not exists indicate path1 need to reload to file.ini
+		file.LoadMonitorIniFile(path1)
+		return fmt.Errorf("RecoverFile err path1:%s is not exist", path1)
+	}
+
+	//恢复文件
+	return file1.SaveTo(path1)
 }
 
 //GetIntersectSection 获取两个文件内容的section交集结果

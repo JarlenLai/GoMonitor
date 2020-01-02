@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/ini"
+
 )
 
 const (
@@ -23,6 +24,7 @@ type MonitorCfg struct {
 	servicePartName []string          //监控的包含指定前缀的服务
 	fileDir         map[string]string //需要监控的文件目录以及目录下的文件类型
 	fileSpec        []string          //需要监控的指定文件
+	removeRecover   int               //文件被删除时进行恢复（目前只做ini的）
 	logFileSize     int64             //日记文件大小
 	emailData       EmailData
 	refreshSCMTime  int
@@ -35,6 +37,7 @@ func NewMonitorCfg() *MonitorCfg {
 		servicePartName: make([]string, 0),
 		fileDir:         make(map[string]string),
 		fileSpec:        make([]string, 0),
+		removeRecover:   0,
 		logFileSize:     800,
 		emailData:       EmailData{receiveU: make([]string, 0)}}
 }
@@ -173,6 +176,12 @@ func (mcfg *MonitorCfg) LoadMonitorFileCfg(path string) error {
 		for _, key := range keys {
 			mcfg.fileSpec = append(mcfg.fileSpec, key.Value())
 		}
+	}
+
+	mcfg.removeRecover = 0
+	sec, err = cfg.GetSection("MonitorFileOption")
+	if err == nil {
+		mcfg.removeRecover, _ = sec.Key("RemoveFileRecover").Int()
 	}
 
 	return nil

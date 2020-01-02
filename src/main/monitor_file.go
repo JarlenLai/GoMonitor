@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fsnotify"
+
 )
 
 //MonitorFile 监控的文件列表
@@ -44,7 +45,8 @@ func UpdateMonitorFileCfg(mc *MonitorCfg, mf *MonitorFile, e *Email, cfgPath str
 	}
 
 	paths := monitorCfg.GetMonitorFileList() //获取监控文件列表
-	mf.UpdateWatcherFile(paths)
+	mf.UpdateWatcherFile(paths)              //更新监控文件列表(新添加的监控文件需要加入)
+	mf.RefreshWatcherFile()                  //刷新监控文件(监控失败的需要从新监控)
 	files := mf.GetMonitorFiles()
 
 	var str string
@@ -106,7 +108,7 @@ func (files *MonitorFile) RefreshWatcherFile() {
 		if !v && PathExists(k) {
 			err := files.watcher.Add(k)
 			if err != nil {
-				logFile.ErrorDoo("add watch file:", k, "err:", err)
+				logFile.ErrorDoo("RefreshWatcherFile add watch file:", k, "err:", err)
 				files.fileMap[k] = false
 			}
 			files.fileMap[k] = true
@@ -117,8 +119,37 @@ func (files *MonitorFile) RefreshWatcherFile() {
 	files.mu.Unlock()
 }
 
+//UpdateFileWatchFlag 更新监控文件的标志
+func (files *MonitorFile) UpdateFileWatchFlag(path string, f bool) {
+	files.mu.Lock()
+	if _, ok := files.fileMap[path]; ok {
+		files.fileMap[path] = f
+	} else {
+		logFile.ErrorDoo("UpdateFileWatchFlag err:", path, "is not exist:")
+	}
+	files.mu.Unlock()
+}
+
+//FilejoinWatcher 文件加入监控
+func (files *MonitorFile) FilejoinWatcher(path string) {
+	files.mu.Lock()
+	if v, ok := files.fileMap[path]; ok {
+		if !v {
+			err := files.watcher.Add(path)
+			if err != nil {
+				logFile.ErrorDoo("FilejoinWatcher add watch file:", path, "err:", err)
+			}
+			files.fileMap[path] = true
+		}
+	} else {
+		logFile.InfoDoo("FilejoinWatcher :", path, "is not exist:")
+		files.fileMap[path] = false
+	}
+	files.mu.Unlock()
+}
+
 //StartWatcher 开始进行监控
-func (files *MonitorFile) StartWatcher(paths []string) {
+func (files *MonitorFile) StartWatcher(paths []string, cfg *MonitorCfg) {
 
 	files.mu.Lock()
 	files.fileList = paths
@@ -166,6 +197,26 @@ func (files *MonitorFile) StartWatcher(paths []string) {
 
 					}
 
+				} else if event.Op&fsnotify.Remove == fsnotify.Remove {
+					if len([]rune(event.Name)) > 0 {
+						logFile.InfoDoo("monitor event:", event)
+						files.UpdateFileWatchFlag(event.Name, false) //文件被移除需要更新文件监控标志
+
+						//获取ini文件恢复标志
+						cfg.mu.RLock()
+						recoverFlag := cfg.removeRecover
+						cfg.mu.RUnlock()
+
+						//对于被删除的ini文件进行恢复
+						if recoverFlag == 1 && doofile.IsIniFile(event.Name) {
+							if err := files.iniFile.iniFile.RecoverFile(event.Name); err == nil {
+								files.FilejoinWatcher(event.Name) //恢复成功的文件重新加入监控中
+								logFile.InfoDoo("Remove file:", event.Name, "recover Ok")
+							} else {
+								logFile.InfoDoo("Remove file:", event.Name, "recover err:", err)
+							}
+						}
+					}
 				} else {
 					if len([]rune(event.Name)) > 0 {
 						logFile.InfoDoo("monitor event:", event)

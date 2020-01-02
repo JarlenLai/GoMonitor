@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fsnotify"
+
 )
 
 const (
@@ -121,8 +122,8 @@ func mainMonitorFile() {
 		logFile.SetDayLogHandleFileSize(monitorCfg.logFileSize)
 	}
 
-	paths := monitorCfg.GetMonitorFileList() //获取监控文件列表
-	monitorFile.StartWatcher(paths)          //开始监控，并阻塞直到退出
+	paths := monitorCfg.GetMonitorFileList()    //获取监控文件列表
+	monitorFile.StartWatcher(paths, monitorCfg) //开始监控，并阻塞直到退出
 }
 
 //WaitReloadCfg 配置文件修改时进行配置文件重载
@@ -394,8 +395,11 @@ func GetCfgPath() (string, error) {
 			"#文件监控配置MonitorFileXXX(切记不要监控本程序自身的日记文件会导致死循环监控)\r\n" +
 			"#[MonitorFileDir]Type(n)+Path(n)=要监控的具体文件\r\n" +
 			"#[MonitorFileSpec]指定具体的监控文件,支持!运算(即!fileName表示不监控fileName文件)\r\n" +
+			"#[MonitorFileOption]监控文件选项\r\n" +
+			"#<RemoveFileRecover> 为1时表示监控的文件被进行删除操作时进行恢复（目前只支持ini文件）,为0表示不开启\r\n" +
 			"[MonitorFileDir]\r\nType1=ini,exe\r\nPath1=F:\\Monitor\r\nType2=ini,exe\r\nPath2=F:\\Monitor\r\n" +
-			"[MonitorFileSpec]\r\nFile1=F:\\Monitor1\\Jarlen1.txt\r\nFile3=!F:\\Monitor\\Jarlen3.txt\r\n"
+			"[MonitorFileSpec]\r\nFile1=F:\\Monitor1\\Jarlen1.txt\r\nFile3=!F:\\Monitor\\Jarlen3.txt\r\n" +
+			"[MonitorFileOption]\r\nRemoveFileRecover=0\r\n"
 
 		file.WriteString(initContent)
 	}
