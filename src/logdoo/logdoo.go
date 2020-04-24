@@ -240,7 +240,7 @@ func (h *RotatingHandler) RenameDoo() {
 	fileName := fmt.Sprintf("%d%02d%02d.log", year, month, day)
 
 	//是当天的分割文件
-	if strings.Contains(h.filename, "_") && isExist(fileName) {
+	if strings.Contains(h.filename, "_") && isExist(h.dir+"/"+fileName) {
 		fileName = h.filename
 	}
 
