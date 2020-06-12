@@ -1,10 +1,10 @@
 package main
 
 import (
-	"logdoo"
+	"GoMonitor/logdoo"
 	"sync"
 
-	"github.com/gomail"
+	"gopkg.in/gomail.v2"
 )
 
 const (

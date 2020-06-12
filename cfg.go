@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ini"
+	"gopkg.in/ini.v1"
 )
 
 //MonitorCfg 监控程序的配置结构
@@ -158,7 +158,7 @@ func (mcfg *MonitorCfg) GetMachineName() (name string) {
 }
 
 //GetRefreshCfgTime 获取刷新时间
-func (mcfg *MonitorCfg) GetRefreshTime() int{ 
+func (mcfg *MonitorCfg) GetRefreshTime() int {
 	mcfg.mu.Lock()
 	t := mcfg.refreshTime
 	mcfg.mu.Unlock()

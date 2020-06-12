@@ -1,7 +1,7 @@
 package main
 
 import (
-	"logdoo"
+	"GoMonitor/logdoo"
 	"strings"
 	"sync"
 	"syscall"
@@ -45,10 +45,10 @@ func NewMonitorService() *MonitorService {
 		return nil
 	}
 	return &MonitorService{scm: manager,
-		services:     		 make(map[string]*mgr.Service),
-		serviceEmail: 		 make(map[string]bool),
-		serviceState: 		 make(map[string]int),
-		serviceAddChan: 	 make([]chan mgr.Service,ServiceChanNum),
+		services:            make(map[string]*mgr.Service),
+		serviceEmail:        make(map[string]bool),
+		serviceState:        make(map[string]int),
+		serviceAddChan:      make([]chan mgr.Service, ServiceChanNum),
 		serviceAddChanIndex: make(map[int]bool, ServiceChanNum),
 		curAddChanIndex:     0,
 		serviceDelChan:      make(chan mgr.Service, 100),

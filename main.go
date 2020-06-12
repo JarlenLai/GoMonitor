@@ -1,13 +1,14 @@
 package main
 
 import (
+	"GoMonitor/logdoo"
 	"fmt"
-	"github.com/fsnotify"
 	"io/ioutil"
-	"logdoo"
 	"os"
 	"path/filepath"
 	"time"
+
+	"gopkg.in/fsnotify.v1"
 )
 
 const (
@@ -25,7 +26,7 @@ var monitorService = NewMonitorService()
 var monitorEmail = NewEmail()
 
 func main() {
-	RunWindowService(IsRelease)
+	RunWindowService(IsDebug)
 }
 
 func ServerMain() {

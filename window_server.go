@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"syscall"
+	"unsafe"
+
 	"github.com/btcsuite/winsvc/debug"
 	"github.com/btcsuite/winsvc/eventlog"
 	"github.com/btcsuite/winsvc/mgr"
 	"github.com/btcsuite/winsvc/svc"
 	"github.com/kardianos/service"
 	"golang.org/x/sys/windows"
-	"os"
-	"syscall"
-	"unsafe"
 )
 
 const (
