@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/gomail"
+	"gopkg.in/gomail.v2"
 )
 
 const (

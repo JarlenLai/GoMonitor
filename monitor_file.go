@@ -1,13 +1,12 @@
 package main
 
 import (
-	"doofile"
+	"GoMonitor/doofile"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/fsnotify"
-
+	"gopkg.in/fsnotify.v1"
 )
 
 //MonitorFile 监控的文件列表

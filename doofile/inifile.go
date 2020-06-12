@@ -5,8 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ini"
-
+	"gopkg.in/ini.v1"
 )
 
 const (
