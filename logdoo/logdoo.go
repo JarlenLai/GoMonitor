@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -239,33 +238,34 @@ func (h *RotatingHandler) RenameDoo() {
 	year, month, day := now.Date()
 	fileName := fmt.Sprintf("%d%02d%02d.log", year, month, day)
 
-	//是当天的分割文件
-	if strings.Contains(h.filename, "_") && isExist(h.dir+"/"+fileName) {
-		fileName = h.filename
-	}
+	/*
+		//是当天的分割文件
+		if strings.Contains(h.filename, "_") && isExist(h.dir+"/"+fileName) {
+			fileName = h.filename
+		}
 
-	//文件超过最大限制新建一个后缀文件
-	if isExist(h.dir+"/"+fileName) && fileSize(h.dir+"/"+fileName) >= h.maxSize {
-
-	LOOP: //如果对应的后缀文件已经存在就继续累计后缀
+		//文件超过最大限制新建一个后缀文件
 		if isExist(h.dir+"/"+fileName) && fileSize(h.dir+"/"+fileName) >= h.maxSize {
-			h.suffix++
-			fileName = fmt.Sprintf("%d%02d%02d_%d.log", year, month, day, h.suffix)
-			goto LOOP
-		}
 
-		logfile, _ := os.OpenFile(h.dir+"/"+fileName, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
-		l := New(logfile, "", Ltime|Lmicroseconds|Lshortfile)
-		h.lg = l
-		h.filename = fileName
-		if h.logfile != nil {
-			h.logfile.Close()
-			h.logfile = logfile
-		}
-		h.lg.SetOutput(logfile)
-		return
-	}
+		LOOP: //如果对应的后缀文件已经存在就继续累计后缀
+			if isExist(h.dir+"/"+fileName) && fileSize(h.dir+"/"+fileName) >= h.maxSize {
+				h.suffix++
+				fileName = fmt.Sprintf("%d%02d%02d_%d.log", year, month, day, h.suffix)
+				goto LOOP
+			}
 
+			logfile, _ := os.OpenFile(h.dir+"/"+fileName, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
+			l := New(logfile, "", Ltime|Lmicroseconds|Lshortfile)
+			h.lg = l
+			h.filename = fileName
+			if h.logfile != nil {
+				h.logfile.Close()
+				h.logfile = logfile
+			}
+			h.lg.SetOutput(logfile)
+			return
+		}
+	*/
 	//每天一个文件
 	if !isExist(h.dir+"/"+fileName) || h.lg == nil {
 		logfile, _ := os.OpenFile(h.dir+"/"+fileName, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
