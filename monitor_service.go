@@ -198,6 +198,9 @@ func (ms *MonitorService) LoopCheck() {
 		if status.State == svc.Stopped {
 			sers = append(sers, *service)
 			ms.serviceState[service.Name] = ServicePending
+		} else if status.State == svc.Running {
+			ms.serviceState[service.Name] = ServiceRuning
+			ms.serviceEmail[service.Name] = false //下次重启的时候要发邮件
 		}
 	}
 	ms.mu.Unlock()
