@@ -50,9 +50,20 @@ func (p *program) Stop(s service.Service) error {
 }
 
 func RunWindowService(status int) {
+	//获取配置文件目录
+	cfgPath, err := GetCfgPath()
+	if err != nil {
+		logSer.ErrorDoo("GetCfgPath err", err)
+	}
+
+	mc := NewMonitorCfg()
+	if err := mc.LoadMonitorComCfg(cfgPath); err != nil {
+		logSer.ErrorDoo("LoadMonitorComCfg err:", err)
+	}
+
 	svcConfig := &service.Config{
-		Name:        "Doo_MonitorService",        //服务显示名称
-		DisplayName: "Doo_MonitorService",        //服务名称
+		Name:        mc.serverName,               //服务显示名称
+		DisplayName: mc.serverName,               //服务名称
 		Description: "Go Monitor window service", //服务描述
 	}
 

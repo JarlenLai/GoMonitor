@@ -18,6 +18,7 @@ const (
 
 //MonitorCfg 监控程序的配置结构
 type MonitorCfg struct {
+	serverName      string
 	machineName     string                    //当前监控的机器名
 	serviceSpecName map[string]ServiceSpecCfg //指定的service名字以及对应附件目录
 	servicePartName []string                  //监控的包含指定前缀的服务
@@ -212,6 +213,10 @@ func (mcfg *MonitorCfg) LoadMonitorComCfg(path string) error {
 	mcfg.machineName = "Unknow Machine Name"
 	hasCfg := false
 	if sec, er := cfg.GetSection("CommonData"); er == nil {
+		//当前服务的安装名称
+		if sec.HasKey("ServerName") {
+			mcfg.serverName = sec.Key("ServerName").Value()
+		}
 
 		//当前监控window机器的标识
 		if sec.HasKey("MachineName") {
