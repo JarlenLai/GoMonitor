@@ -37,7 +37,7 @@ var logFile = logdoo.NewLogger() //监控文件log函数
 
 //函数入口
 func main() {
-	RunMode = IsRelease //如果要调试或者本地运行,请修改这里
+	RunMode = IsDebug //如果要调试或者本地运行,请修改这里
 	RunWindowService(RunMode)
 }
 

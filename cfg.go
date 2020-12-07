@@ -18,21 +18,27 @@ const (
 
 //MonitorCfg 监控程序的配置结构
 type MonitorCfg struct {
-	machineName     string            //当前监控的机器名
-	serviceSpecName map[string]string //指定的service名字以及对应附件目录
-	servicePartName []string          //监控的包含指定前缀的服务
-	fileDir         map[string]string //需要监控的文件目录以及目录下的文件类型
-	fileSpec        []string          //需要监控的指定文件
-	removeRecover   int               //文件被删除时进行恢复（目前只做ini的）
-	logFileSize     int64             //日记文件大小
+	machineName     string                    //当前监控的机器名
+	serviceSpecName map[string]ServiceSpecCfg //指定的service名字以及对应附件目录
+	servicePartName []string                  //监控的包含指定前缀的服务
+	fileDir         map[string]string         //需要监控的文件目录以及目录下的文件类型
+	fileSpec        []string                  //需要监控的指定文件
+	removeRecover   int                       //文件被删除时进行恢复（目前只做ini的）
+	logFileSize     int64                     //日记文件大小
 	emailData       EmailData
 	refreshSCMTime  int
 	mu              sync.RWMutex
 }
 
+//ServiceSpecCfg 指定服务的配置
+type ServiceSpecCfg struct {
+	attach string
+	delay  int64
+}
+
 //NewMonitorCfg New一个配置变量
 func NewMonitorCfg() *MonitorCfg {
-	return &MonitorCfg{serviceSpecName: make(map[string]string),
+	return &MonitorCfg{serviceSpecName: make(map[string]ServiceSpecCfg),
 		servicePartName: make([]string, 0),
 		fileDir:         make(map[string]string),
 		fileSpec:        make([]string, 0),
@@ -73,7 +79,7 @@ func (mcfg *MonitorCfg) LoadMonitorServiceCfg(path string) error {
 	mcfg.mu.Lock()
 	defer mcfg.mu.Unlock()
 
-	mcfg.serviceSpecName = make(map[string]string)
+	mcfg.serviceSpecName = make(map[string]ServiceSpecCfg)
 	mcfg.servicePartName = make([]string, 0)
 	if sec, er := cfg.GetSection("MonitorServiceSpec"); er == nil {
 		var beforeSuffix = -1
@@ -84,6 +90,8 @@ func (mcfg *MonitorCfg) LoadMonitorServiceCfg(path string) error {
 				suffix, _ = strconv.Atoi(strings.TrimPrefix(key.Name(), "Name"))
 			} else if strings.HasPrefix(key.Name(), "Attach") {
 				suffix, _ = strconv.Atoi(strings.TrimPrefix(key.Name(), "Attach"))
+			} else if strings.HasPrefix(key.Name(), "DelayTime") {
+				suffix, _ = strconv.Atoi(strings.TrimPrefix(key.Name(), "DelayTime"))
 			} else {
 				continue
 			}
@@ -94,11 +102,16 @@ func (mcfg *MonitorCfg) LoadMonitorServiceCfg(path string) error {
 			beforeSuffix = suffix
 
 			if sec.HasKey("Name" + strconv.Itoa(suffix)) {
+				specCfg := ServiceSpecCfg{attach: "", delay: 0}
 				if sec.HasKey("Attach" + strconv.Itoa(suffix)) {
-					mcfg.serviceSpecName[sec.Key("Name"+strconv.Itoa(suffix)).Value()] = sec.Key("Attach" + strconv.Itoa(suffix)).Value()
-				} else {
-					mcfg.serviceSpecName[sec.Key("Name"+strconv.Itoa(suffix)).Value()] = ""
+					specCfg.attach = sec.Key("Attach" + strconv.Itoa(suffix)).Value()
 				}
+
+				if sec.HasKey("DelayTime" + strconv.Itoa(suffix)) {
+					specCfg.delay, _ = sec.Key("DelayTime" + strconv.Itoa(suffix)).Int64()
+				}
+
+				mcfg.serviceSpecName[sec.Key("Name"+strconv.Itoa(suffix)).Value()] = specCfg
 			}
 		}
 	}
@@ -335,10 +348,20 @@ func (mcfg *MonitorCfg) GetRefreshSCMTime() int {
 func (mcfg *MonitorCfg) GetServiceAttachPath(service string) (string, bool) {
 	mcfg.mu.RLock()
 	defer mcfg.mu.RUnlock()
-	if _, ok := mcfg.serviceSpecName[service]; ok {
-		return mcfg.serviceSpecName[service], true
+	if spec, ok := mcfg.serviceSpecName[service]; ok {
+		return spec.attach, true
 	}
 	return "", false
+}
+
+//GetServiceDelay 获取当前监控服务的延迟启动时间
+func (mcfg *MonitorCfg) GetServiceDelay(service string) (int64, bool) {
+	mcfg.mu.RLock()
+	defer mcfg.mu.RUnlock()
+	if spec, ok := mcfg.serviceSpecName[service]; ok {
+		return spec.delay, true
+	}
+	return 0, false
 }
 
 //GetAllFiles 获取指定目录下的所有文件,包含子目录下的文件

@@ -508,8 +508,14 @@ func (ms *MonitorService) Addmonitor(i int, c *MonitorCfg, e *Email) {
 				logSer.InfoDoo("Addmonitor goroutine", i, "service is nil")
 				continue
 			}
-			logSer.InfoDoo("goroutine", i, "begin restart service", service.Name, service.Handle)
+			delay, _ := c.GetServiceDelay(service.Name)
+			logSer.InfoDoo("goroutine", i, "begin delay:", delay, "s restart service", service.Name, service.Handle)
 			ms.SendEmail(service.Name, c, e)
+
+			//进行延迟启动
+			if delay > 0 {
+				time.Sleep(time.Duration(delay) * time.Second)
+			}
 			//service.Start 这个函数是阻塞式的,没有及时响应会导致30秒后超时
 			if er := service.Start([]string{service.Name}); er != nil {
 				logSer.ErrorDoo("goroutine", i, "restart service", service.Name, "err", er)
